@@ -1,0 +1,4 @@
+com\edu\service\AuthService.class
+com\edu\service\CustomUserDetailsService.class
+com\edu\service\StudentService.class
+com\edu\service\TeacherService.class

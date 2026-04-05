@@ -1,0 +1,11 @@
+com\edu\domain\Grade.class
+com\edu\domain\ActivityRecord.class
+com\edu\domain\ErrorRecord.class
+com\edu\domain\ClassInfo.class
+com\edu\domain\Exam.class
+com\edu\domain\KnowledgePoint.class
+com\edu\domain\Role.class
+com\edu\domain\User.class
+com\edu\domain\dto\LoginRequest.class
+com\edu\domain\Question.class
+com\edu\domain\dto\RegisterRequest.class
