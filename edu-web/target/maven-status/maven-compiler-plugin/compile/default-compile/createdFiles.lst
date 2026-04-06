@@ -1,7 +1,7 @@
-com\edu\web\EduBackendApplication.class
 com\edu\web\controller\AuthController.class
 com\edu\web\controller\TeacherController.class
 com\edu\web\security\SecurityConfig.class
 com\edu\web\controller\StudentController.class
 com\edu\web\config\SwaggerConfig.class
+com\edu\web\EduBackendApplication.class
 com\edu\web\security\JwtAuthenticationFilter.class

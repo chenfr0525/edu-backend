@@ -7,7 +7,6 @@ import com.edu.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -17,10 +16,8 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/login")
-    public Result<Map<String, String>> login(@RequestBody LoginRequest request) {
-        String token = authService.login(request.getUsername(), request.getPassword());
-        Map<String, String> data = new HashMap<>();
-        data.put("token", token);
+    public Result<Map<String, Object>> login(@RequestBody LoginRequest request) {
+        Map<String, Object> data = authService.login(request.getUsername(), request.getPassword());
         return Result.success(data);
     }
 

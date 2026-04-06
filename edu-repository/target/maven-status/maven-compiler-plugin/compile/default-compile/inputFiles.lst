@@ -1,8 +1,14 @@
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\EnrollmentRepository.java
 C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\ExamRepository.java
 C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\ActivityRecordRepository.java
-C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\ClassRepository.java
-C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\mapper\UserMapper.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\CourseRepository.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\SubmissionRepository.java
 C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\KnowledgePointRepository.java
 C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\GradeRepository.java
 C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\UserRepository.java
 C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\ErrorRecordRepository.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\ClassRepository.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\mapper\UserMapper.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\HomeworkRepository.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\SemesterRepository.java
+C:\Users\23212\Desktop\work\my-project\edu-backend\edu-repository\src\main\java\com\edu\repository\AttendanceRepository.java

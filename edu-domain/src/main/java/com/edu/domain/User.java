@@ -25,9 +25,25 @@ public class User {
     @Column(nullable = false)
     private String name;
 
+    @Column(name = "student_no")
+    private String studentNo;
+
+    private String email;
+    
+    private String phone;
+
+    private String avatar;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UserStatus status = UserStatus.ACTIVE;
+
+    @Column(name = "last_login_time")
+    private LocalDateTime lastLoginTime;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -39,6 +55,7 @@ public class User {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (status == null) status = UserStatus.ACTIVE;
     }
 
     @PreUpdate

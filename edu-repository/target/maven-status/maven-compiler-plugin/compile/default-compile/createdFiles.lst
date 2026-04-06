@@ -1,8 +1,14 @@
-com\edu\repository\ClassRepository.class
-com\edu\repository\UserRepository.class
-com\edu\repository\ExamRepository.class
+com\edu\repository\SemesterRepository.class
+com\edu\repository\SubmissionRepository.class
+com\edu\repository\CourseRepository.class
+com\edu\repository\HomeworkRepository.class
 com\edu\repository\mapper\UserMapper.class
 com\edu\repository\ActivityRecordRepository.class
+com\edu\repository\ClassRepository.class
+com\edu\repository\UserRepository.class
+com\edu\repository\EnrollmentRepository.class
+com\edu\repository\AttendanceRepository.class
+com\edu\repository\ExamRepository.class
 com\edu\repository\KnowledgePointRepository.class
 com\edu\repository\GradeRepository.class
 com\edu\repository\ErrorRecordRepository.class
