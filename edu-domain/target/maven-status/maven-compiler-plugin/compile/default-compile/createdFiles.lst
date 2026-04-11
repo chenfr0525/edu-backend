@@ -4,11 +4,13 @@ com\edu\domain\SubmissionStatus.class
 com\edu\domain\dto\TeacherStatsDTO$TeacherStatsDTOBuilder.class
 com\edu\domain\UserStatus.class
 com\edu\domain\dto\LoginRequest.class
+com\edu\domain\dto\StudentDTO$StudentDTOBuilder.class
 com\edu\domain\Semester.class
 com\edu\domain\Question.class
 com\edu\domain\dto\RegisterRequest.class
 com\edu\domain\Enrollment.class
 com\edu\domain\Homework.class
+com\edu\domain\Student.class
 com\edu\domain\ClassInfo.class
 com\edu\domain\Role.class
 com\edu\domain\User.class
@@ -19,6 +21,7 @@ com\edu\domain\dto\GradeTrendDTO.class
 com\edu\domain\dto\KnowledgeMasteryDTO$KnowledgeMasteryDTOBuilder.class
 com\edu\domain\dto\StudentStatsDTO$StudentStatsDTOBuilder.class
 com\edu\domain\dto\GradeTrendDTO$GradeTrendDTOBuilder.class
+com\edu\domain\dto\StudentDTO.class
 com\edu\domain\Course.class
 com\edu\domain\dto\StudentStatsDTO.class
 com\edu\domain\Exam.class

@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "submissions")
+@Table(name = "submission")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -22,20 +22,20 @@ public class Submission {
 
     @ManyToOne
     @JoinColumn(name = "student_id")
-    private User student;
+    private Student student;
 
     @Column(columnDefinition = "TEXT")
     private String content;
 
-    private String files; // JSON or comma-separated list of file paths/names
-
-    @Enumerated(EnumType.STRING)
-    private SubmissionStatus status = SubmissionStatus.SUBMITTED;
-
+    private String attachments;
+    
     private Double score;
 
     @Column(columnDefinition = "TEXT")
     private String feedback;
+
+    @Enumerated(EnumType.STRING)
+    private SubmissionStatus status = SubmissionStatus.PENDING;
 
     @Column(name = "submitted_at")
     private LocalDateTime submittedAt;

@@ -25,18 +25,17 @@ public class User {
     @Column(nullable = false)
     private String name;
 
-    @Column(name = "student_no")
-    private String studentNo;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Role role;
+
+    private String gender;
+
+    private String avatar;
 
     private String email;
     
     private String phone;
-
-    private String avatar;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private Role role;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

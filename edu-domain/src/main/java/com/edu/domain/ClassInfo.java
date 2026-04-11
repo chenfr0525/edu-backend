@@ -1,5 +1,7 @@
 package com.edu.domain;
 
+import java.time.LocalDateTime;
+
 import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -18,7 +20,17 @@ public class ClassInfo {
     @Column(nullable = false)
     private String name;
 
+    @Column(nullable = false, length = 20)
+    private String grade;
+
     @ManyToOne
     @JoinColumn(name = "teacher_id")
     private User teacher;
+
+     @Column(name = "created_at")
+    private LocalDateTime createdAt;
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+    }
 }

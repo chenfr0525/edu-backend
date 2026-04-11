@@ -23,11 +23,11 @@ public class TeacherService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public List<ClassInfo> getClassesByTeacher(String username) {
-        User teacher = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Teacher not found"));
-        return classRepository.findByTeacher(teacher);
-    }
+    // public List<ClassInfo> getClassesByTeacher(String username) {
+    //     User teacher = userRepository.findByUsername(username)
+    //             .orElseThrow(() -> new RuntimeException("Teacher not found"));
+    //     return classRepository.findByTeacher(teacher);
+    // }
 
     public List<Exam> getExamsByClass(Long classId) {
         ClassInfo classInfo = classRepository.findById(classId)
@@ -86,30 +86,30 @@ public class TeacherService {
         return result;
     }
 
-    public Map<String, Object> getHighFrequencyErrors(Long classId, Long examId) {
-        Exam exam = examRepository.findById(examId)
-                .orElseThrow(() -> new RuntimeException("Exam not found"));
-        List<ErrorRecord> errors = errorRecordRepository.findByExam(exam);
+    // public Map<String, Object> getHighFrequencyErrors(Long classId, Long examId) {
+    //     Exam exam = examRepository.findById(examId)
+    //             .orElseThrow(() -> new RuntimeException("Exam not found"));
+    //     List<ErrorRecord> errors = errorRecordRepository.findByExam(exam);
 
-        Map<Question, Long> errorCounts = errors.stream()
-                .filter(e -> e.getQuestion() != null)
-                .collect(Collectors.groupingBy(ErrorRecord::getQuestion, Collectors.counting()));
+    //     Map<Question, Long> errorCounts = errors.stream()
+    //             .filter(e -> e.getQuestion() != null)
+    //             .collect(Collectors.groupingBy(ErrorRecord::getQuestion, Collectors.counting()));
 
-        List<Map.Entry<Question, Long>> sortedErrors = errorCounts.entrySet().stream()
-                .sorted((e1, e2) -> e2.getValue().compareTo(e1.getValue()))
-                .limit(5)
-                .collect(Collectors.toList());
+    //     List<Map.Entry<Question, Long>> sortedErrors = errorCounts.entrySet().stream()
+    //             .sorted((e1, e2) -> e2.getValue().compareTo(e1.getValue()))
+    //             .limit(5)
+    //             .collect(Collectors.toList());
 
-        List<String> questions = sortedErrors.stream().map(e -> "第" + e.getKey().getId() + "题").collect(Collectors.toList());
-        List<Long> errorRates = sortedErrors.stream().map(Map.Entry::getValue).collect(Collectors.toList());
-        List<Long> ids = sortedErrors.stream().map(e -> e.getKey().getId()).collect(Collectors.toList());
+    //     List<String> questions = sortedErrors.stream().map(e -> "第" + e.getKey().getId() + "题").collect(Collectors.toList());
+    //     List<Long> errorRates = sortedErrors.stream().map(Map.Entry::getValue).collect(Collectors.toList());
+    //     List<Long> ids = sortedErrors.stream().map(e -> e.getKey().getId()).collect(Collectors.toList());
 
-        Map<String, Object> result = new HashMap<>();
-        result.put("questions", questions);
-        result.put("errorRates", errorRates);
-        result.put("questionIds", ids);
-        return result;
-    }
+    //     Map<String, Object> result = new HashMap<>();
+    //     result.put("questions", questions);
+    //     result.put("errorRates", errorRates);
+    //     result.put("questionIds", ids);
+    //     return result;
+    // }
 
     // Student Management Methods
     public Page<User> getStudents(String keyword, Long classId, UserStatus status, Pageable pageable) {
@@ -126,21 +126,21 @@ public class TeacherService {
         return userRepository.save(student);
     }
 
-    @Transactional
-    public User updateStudent(Long id, User studentDetails) {
-        User student = userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Student not found"));
+    // @Transactional
+    // public User updateStudent(Long id, User studentDetails) {
+    //     User student = userRepository.findById(id)
+    //             .orElseThrow(() -> new RuntimeException("Student not found"));
         
-        student.setName(studentDetails.getName());
-        student.setEmail(studentDetails.getEmail());
-        student.setPhone(studentDetails.getPhone());
-        student.setStudentNo(studentDetails.getStudentNo());
-        if (studentDetails.getStatus() != null) {
-            student.setStatus(studentDetails.getStatus());
-        }
+    //     student.setName(studentDetails.getName());
+    //     student.setEmail(studentDetails.getEmail());
+    //     student.setPhone(studentDetails.getPhone());
+    //     student.setStudentNo(studentDetails.getStudentNo());
+    //     if (studentDetails.getStatus() != null) {
+    //         student.setStatus(studentDetails.getStatus());
+    //     }
         
-        return userRepository.save(student);
-    }
+    //     return userRepository.save(student);
+    // }
 
     @Transactional
     public void deleteStudent(Long id) {

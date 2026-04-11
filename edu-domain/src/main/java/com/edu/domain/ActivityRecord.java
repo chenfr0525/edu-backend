@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "activity_records")
+@Table(name = "activity_record")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -17,15 +17,24 @@ public class ActivityRecord {
     private Long id;
 
     @ManyToOne
-    @JoinColumn(name = "user_id")
-    private User user;
+    @JoinColumn(name = "student_id")
+    private Student student;
 
-    @Column(nullable = false)
-    private String activityType;
+    @Column(name = "type")
+      @Enumerated(EnumType.STRING)
+    private ActivityStatus type = ActivityStatus.VISIT;
 
-    @Column(nullable = false)
-    private Integer duration; // in minutes
+      @Column(columnDefinition = "TEXT")
+    private String description;
 
-    @Column(nullable = false)
-    private LocalDateTime timestamp;
+      @Column(name = "activity_date")
+    private LocalDateTime activityDate;
+
+    @Column(name = "study_duration")
+    private Integer studyDuration;
+
+     @PrePersist
+    protected void onCreate() {
+        activityDate = LocalDateTime.now();
+    }
 }

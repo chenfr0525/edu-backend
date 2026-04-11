@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "error_records")
+@Table(name = "error_record")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -16,23 +16,16 @@ public class ErrorRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private String name;
+
     @ManyToOne
     @JoinColumn(name = "student_id")
-    private User student;
+    private Student student;
 
     @ManyToOne
-    @JoinColumn(name = "question_id")
-    private Question question;
+    @JoinColumn(name = "knowledge_point_id")
+    private KnowledgePoint knowledgePoint;
 
-    @ManyToOne
-    @JoinColumn(name = "exam_id")
-    private Exam exam;
-
-    @Column(name = "created_at")
-    private LocalDateTime createdAt;
-
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-    }
+    @Column(name = "last_error_at")
+    private LocalDateTime lastErrorAt;
 }

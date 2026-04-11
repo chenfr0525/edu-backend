@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "semesters")
+@Table(name = "semester")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -15,9 +15,6 @@ public class Semester {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @Column(nullable = false, unique = true)
-    private String code; // e.g., 2024-2025-1
 
     @Column(nullable = false)
     private String name; // e.g., 2024-2025 第一学期

@@ -9,6 +9,7 @@ com\edu\repository\UserRepository.class
 com\edu\repository\EnrollmentRepository.class
 com\edu\repository\AttendanceRepository.class
 com\edu\repository\ExamRepository.class
+com\edu\repository\StudentRepository.class
 com\edu\repository\KnowledgePointRepository.class
 com\edu\repository\GradeRepository.class
 com\edu\repository\ErrorRecordRepository.class

@@ -1,3 +1,4 @@
+com\edu\web\controller\StudentManageController.class
 com\edu\web\controller\AuthController.class
 com\edu\web\controller\TeacherController.class
 com\edu\web\security\SecurityConfig.class
