@@ -43,6 +43,15 @@ public class Submission {
     @Column(name = "graded_at")
     private LocalDateTime gradedAt;
 
+    @Column(name = "knowledge_point_scores")
+    private String knowledgePointScores;
+
+    @Column(name = "submission_late_minutes")
+    private Integer submissionLateMinutes;
+
+    @Column(name = "ai_feedback")
+    private String aiFeedback;
+
     @PrePersist
     protected void onSubmit() {
         submittedAt = LocalDateTime.now();

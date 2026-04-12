@@ -33,6 +33,19 @@ public class ExamGrade {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    @Column(name = "class_rank")
+    private Integer classRank;
+
+
+    @Column(name = "grade_rank")
+    private Integer gradeRank;
+
+    @Column(name = "score_trend")
+    private String scoreTrend;
+
+    @Column(name = "knowledge_point_scores")
+    private String knowledgePointScores;
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

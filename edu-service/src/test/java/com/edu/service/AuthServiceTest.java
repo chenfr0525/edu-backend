@@ -49,7 +49,7 @@ class AuthServiceTest {
         when(passwordEncoder.matches(password, "encodedPassword")).thenReturn(true);
         when(jwtUtils.generateToken(username, "STUDENT")).thenReturn("mockToken");
 
-        Map<String, Object> result = authService.login(username, password);
+        Map<String, Object> result = authService.login(username, password, "STUDENT");
 
         assertNotNull(result);
         assertEquals("mockToken", result.get("token"));
@@ -61,6 +61,6 @@ class AuthServiceTest {
         String username = "nonexistent";
         when(userRepository.findByUsername(username)).thenReturn(Optional.empty());
 
-        assertThrows(RuntimeException.class, () -> authService.login(username, "password"));
+        assertThrows(RuntimeException.class, () -> authService.login(username, "password", "STUDENT"));
     }
 }

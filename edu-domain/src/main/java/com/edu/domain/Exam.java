@@ -4,6 +4,8 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -58,6 +60,23 @@ public class Exam {
 
    @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    @Column(name = "ai_parsed_data")
+    private String aiParsedData;
+
+    @Column(name = "knowledge_points_distribution")
+    private String knowledgePointsDistribution;
+
+    @Column(name = "class_avg_score")
+    private BigDecimal classAvgScore;
+
+
+    @Column(name = "highest_score")
+    private BigDecimal highestScore;
+
+
+    @Column(name = "lowest_score")
+    private BigDecimal lowestScore;
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

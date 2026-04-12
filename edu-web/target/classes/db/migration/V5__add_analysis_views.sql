@@ -1,0 +1,26 @@
+-- -- 学生个人驾驶舱视图
+-- CREATE VIEW `student_dashboard_view` AS
+-- SELECT 
+--     s.id AS student_id,
+--     s.student_no,
+--     u.name AS student_name,
+--     c.name AS class_name,
+--     -- 平均成绩
+--     (SELECT AVG(score) FROM exam_grade WHERE student_id = s.id) AS avg_score,
+--     -- 班级排名趋势
+--     (SELECT JSON_ARRAYAGG(class_rank) FROM exam_grade WHERE student_id = s.id ORDER BY created_at) AS rank_trend,
+--     -- 知识点掌握情况
+--     (SELECT JSON_OBJECT('strong', strong_kp, 'weak', weak_kp) FROM (
+--         SELECT 
+--             JSON_ARRAYAGG(CASE WHEN mastery_level >= 70 THEN kp_name END) AS strong_kp,
+--             JSON_ARRAYAGG(CASE WHEN mastery_level < 50 THEN kp_name END) AS weak_kp
+--         FROM student_knowledge_mastery skm
+--         JOIN knowledge_point kp ON skm.knowledge_point_id = kp.id
+--         WHERE skm.student_id = s.id
+--     ) AS kp_stats) AS knowledge_mastery,
+--     -- 出勤率
+--     (SELECT ROUND(AVG(CASE WHEN activity_score > 0 THEN 1 ELSE 0 END) * 100, 2) 
+--      FROM activity_record WHERE student_id = s.id) AS attendance_rate
+-- FROM student s
+-- JOIN users u ON s.user_id = u.id
+-- LEFT JOIN classes c ON s.class_id = c.id;

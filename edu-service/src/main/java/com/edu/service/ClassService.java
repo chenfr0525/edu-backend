@@ -37,4 +37,8 @@ public class ClassService {
     return classRepository.findAllByGrade(grade);
   }
 
+  public ClassInfo getClassById(Long id){
+    return classRepository.findById(id).orElse(null);
+  }
+
 }

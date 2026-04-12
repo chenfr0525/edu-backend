@@ -3,5 +3,8 @@ package com.edu.domain;
 public enum SubmissionStatus {
     PENDING,
     SUBMITTED,
-    GRADED
+    GRADED,
+    pending,
+    submitted,
+    graded
 }

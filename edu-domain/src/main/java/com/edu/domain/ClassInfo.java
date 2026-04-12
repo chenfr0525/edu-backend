@@ -25,7 +25,7 @@ public class ClassInfo {
 
     @ManyToOne
     @JoinColumn(name = "teacher_id")
-    private User teacher;
+    private Teacher teacher;
 
      @Column(name = "created_at")
     private LocalDateTime createdAt;

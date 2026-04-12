@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.Builder;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import lombok.AllArgsConstructor;
@@ -19,4 +20,7 @@ public class StudentKnowledgeDTO {
   private Integer masteryLevel;
   private Double score;
   private LocalDateTime lastPracticeTime;
+  private String weaknessLevel;
+  private String suggestedActions;
+  private BigDecimal lastExamScoreRate;
 }

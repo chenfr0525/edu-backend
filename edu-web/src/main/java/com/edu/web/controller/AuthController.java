@@ -1,9 +1,12 @@
 package com.edu.web.controller;
 
 import com.edu.common.Result;
+import com.edu.domain.User;
 import com.edu.domain.dto.LoginRequest;
 import com.edu.domain.dto.MenuDTO;
 import com.edu.domain.dto.RegisterRequest;
+import com.edu.domain.dto.UpdatePasswordRequest;
+import com.edu.domain.dto.UpdateUserInfoRequest;
 import com.edu.service.AuthService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -49,4 +52,27 @@ public class AuthController {
         Map<String, Object> userInfo = authService.getUserInfo();
         return Result.success(userInfo);
     }
+
+    /**
+     * 修改User基本信息
+     * POST /auth/user-info
+     */
+     @PostMapping("/auth/update-info")
+     @PreAuthorize("isAuthenticated()")
+      public Result<User> updateUserInfo(@RequestBody UpdateUserInfoRequest request) {
+         User user=authService.updateUserInfo(request);
+         return Result.success(user);
+     }
+
+    /**
+     * 修改密码
+     * POST /auth/update-password
+     */
+    @PostMapping("/auth/update-password")
+     @PreAuthorize("isAuthenticated()")
+    public Result<Void> updatePassword(@RequestBody UpdatePasswordRequest request) {
+        authService.updatePassword(request.getOldPassword(), request.getNewPassword());
+        return Result.success(null);
+    }
+
 }

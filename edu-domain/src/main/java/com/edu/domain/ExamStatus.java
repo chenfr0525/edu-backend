@@ -8,5 +8,13 @@ public enum ExamStatus {
  FINAL,
  UPCOMING,
  ONGOING,
- COMPLETED
+ COMPLETED,
+ completed,
+ mock,
+ unit,
+ monthly,
+ midterm,
+ finalal,
+ upcoming,
+ ongoing
 }

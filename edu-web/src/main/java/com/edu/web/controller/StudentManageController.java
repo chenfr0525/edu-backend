@@ -72,4 +72,15 @@ public class StudentManageController {
         studentService.deleteStudent(id);
         return Result.success(null);
     }
+
+    /**
+     * 密码重置
+     * POST /api/students/1/reset-password
+     */
+    @PostMapping("/{id}/reset-password")
+    public Result<Void> resetPassword(@PathVariable Long id) {
+        studentService.resetPassword(id);
+        return Result.success(null);
+    }
+
 }

@@ -9,6 +9,7 @@ import com.edu.domain.Menu;
 import com.edu.domain.dto.MenuDTO;
 import com.edu.domain.dto.StudentDTO;
 import com.edu.domain.dto.TeacherDTO;
+import com.edu.domain.dto.UpdateUserInfoRequest;
 import com.edu.repository.MenuRepository;
 import com.edu.repository.StudentRepository;
 import com.edu.repository.TeacherRepository;
@@ -62,7 +63,7 @@ public class AuthService {
                 result.put("info", null);
             }
         } else if (user.getRole() == Role.TEACHER) {
-            TeacherDTO teacherDTO = teacherRepository.findByUserId(user.getId())
+            TeacherDTO teacherDTO = teacherRepository.findByUser(user)
                 .map(teacher -> new TeacherDTO(teacher, teacher.getUser()))
                 .orElse(null);
         
@@ -86,9 +87,9 @@ public class AuthService {
             Student student = new Student();
             student.setUser(savedUser);
             student.setStudentNo(generateStudentNo());
-            student.setGrade("2024");
+            student.setGrade("大一");
             studentRepository.save(student);
-            studentService.setStudentClass(student.getId(), "2024002401班");
+            studentService.setStudentClass(student.getId(), "计算机1班");
         } else if(user.getRole() == Role.TEACHER) {
             Teacher teacher = new Teacher();
             teacher.setUser(savedUser);
@@ -129,5 +130,35 @@ public class AuthService {
         userInfo.put("user", user);
         return userInfo;
        }
+
+       /**
+        * 修改User基本信息
+        */
+       public User updateUserInfo(UpdateUserInfoRequest request) {
+        User user = userRepository.findByUsername(jwtUtils.extractUsername(jwtUtils.getToken()))
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        user.setUsername(request.getUsername());
+        user.setName(request.getName());
+        user.setGender(request.getGender());
+        user.setEmail(request.getEmail());
+        user.setPhone(request.getPhone());
+        if(request.getStatus() != null) {
+            user.setStatus(request.getStatus());
+        }
+        return userRepository.save(user);
+       }
+
+    /**
+     * 修改密码
+     */
+    public void updatePassword(String oldPassword, String newPassword) {
+        User user = userRepository.findByUsername(jwtUtils.extractUsername(jwtUtils.getToken()))
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+            throw new RuntimeException("Invalid old password");
+        }
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+    }
 
 }

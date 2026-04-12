@@ -5,5 +5,10 @@ public enum ActivityStatus {
   STUDY,
   DISCUSSION,
   HOMEWORK,
-  VIDEO
+  VIDEO,
+  visit,
+  study,
+  discussion,
+  homework,
+  video
 }

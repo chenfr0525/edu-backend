@@ -4,6 +4,8 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -38,13 +40,25 @@ public class Homework {
 
     @Column(name = "status")
     @Enumerated(EnumType.STRING)
-    private HomeworkStatus status = HomeworkStatus.ONGING;
+    private HomeworkStatus status = HomeworkStatus.ONGOING;
 
     @Column(name = "deadline")
     private LocalDateTime deadline;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    @Column(name = "ai_parsed_data")
+    private String aiParsedData;
+
+    @Column(name = "knowledge_points_mapping")
+    private String knowledgePointsMapping;
+
+    @Column(name = "avg_score")
+    private BigDecimal avgScore;
+
+    @Column(name = "pass_rate")
+    private BigDecimal passRate;
 
     @PrePersist
     protected void onCreate() {

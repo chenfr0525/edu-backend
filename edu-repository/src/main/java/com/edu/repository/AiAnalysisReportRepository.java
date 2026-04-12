@@ -1,0 +1,28 @@
+package com.edu.repository;
+
+import com.edu.domain.AiAnalysisReport;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+@Repository
+public interface AiAnalysisReportRepository extends JpaRepository<AiAnalysisReport, Long> {
+   // 查询某目标的所有报告
+    List<AiAnalysisReport> findByTargetTypeAndTargetId(String targetType, Long targetId);
+    
+    // 查询某学生最新的综合报告
+    AiAnalysisReport findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
+        String targetType, Long targetId, String reportType);
+    
+    // 查询某班级最近一周的报告
+    List<AiAnalysisReport> findByTargetTypeAndTargetIdAndCreatedAtAfter(
+        String targetType, Long targetId, LocalDateTime date);
+    
+    // 查询需要生成报告的学生
+    @Query("SELECT DISTINCT a.targetId FROM AiAnalysisReport a " +
+           "WHERE a.targetType = 'STUDENT' AND a.createdAt < :date")
+    List<Long> findStudentsNeedNewReport(@Param("date") LocalDateTime date);
+}

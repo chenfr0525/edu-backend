@@ -4,6 +4,8 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -32,6 +34,15 @@ public class ActivityRecord {
 
     @Column(name = "study_duration")
     private Integer studyDuration;
+
+    @Column(name = "activity_score")
+    private BigDecimal activityScore;
+
+    @Column(name = "interaction_count")
+    private Integer interactionCount;
+
+    @Column(name = "resource_access_count")
+    private Integer resourceAccessCount;
 
      @PrePersist
     protected void onCreate() {

@@ -1,7 +1,0 @@
--- -- Update users table
--- ALTER TABLE users ADD COLUMN student_no VARCHAR(50);
--- ALTER TABLE users ADD COLUMN email VARCHAR(255);
--- ALTER TABLE users ADD COLUMN phone VARCHAR(50);
--- ALTER TABLE users ADD COLUMN avatar VARCHAR(255);
--- ALTER TABLE users ADD COLUMN status VARCHAR(50) DEFAULT 'ACTIVE';
--- ALTER TABLE users ADD COLUMN last_login_time TIMESTAMP NULL;

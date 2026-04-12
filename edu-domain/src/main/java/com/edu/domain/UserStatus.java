@@ -3,5 +3,8 @@ package com.edu.domain;
 public enum UserStatus {
     ACTIVE,
     FROZEN,
-    PENDING
+    PENDING,
+    active,
+    frozen,
+    pending
 }

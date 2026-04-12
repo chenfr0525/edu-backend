@@ -1,6 +1,8 @@
 package com.edu.repository;
 
 import com.edu.domain.Teacher;
+import com.edu.domain.User;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,8 +13,11 @@ import java.util.Optional;
 @Repository
 public interface TeacherRepository extends JpaRepository<Teacher, Long> {
   
+     // 根据工号查询
+    Optional<Teacher> findByTeacherNo(String teacherNo);
+    
    // 根据userid查询
-   Optional<Teacher> findByUserId(Long userId);
+   Optional<Teacher> findByUser(User user);
   
   Optional<Teacher> findByUserName(String name);
   

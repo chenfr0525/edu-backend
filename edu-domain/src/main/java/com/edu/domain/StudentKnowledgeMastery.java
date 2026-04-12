@@ -4,6 +4,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import javax.persistence.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -34,5 +36,14 @@ public class StudentKnowledgeMastery {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    @Column(name = "weakness_level")
+    private String weaknessLevel;
+
+    @Column(name = "suggested_actions")
+    private String suggestedActions;
+
+    @Column(name = "last_exam_score_rate")
+    private BigDecimal lastExamScoreRate;
 
 }

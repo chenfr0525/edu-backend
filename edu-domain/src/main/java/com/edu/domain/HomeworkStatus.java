@@ -1,8 +1,12 @@
 package com.edu.domain;
 
 public enum HomeworkStatus {
-    ONGING,
+    ONGOING,
     PENDING,
     COMPLETED,
-    EXPIRED
+    EXPIRED,
+    ongoing,
+    pending,
+    completed,
+    expired
 }
