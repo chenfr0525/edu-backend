@@ -1,4 +1,5 @@
 com\edu\common\GlobalExceptionHandler.class
 com\edu\common\JwtUtils.class
 com\edu\common\PageResult.class
+com\edu\common\PageResult$PageResultBuilder.class
 com\edu\common\Result.class

@@ -4,6 +4,7 @@ import com.edu.domain.ErrorRecord;
 import com.edu.domain.KnowledgePoint;
 import com.edu.domain.Student;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -14,7 +15,9 @@ public interface ErrorRecordRepository extends JpaRepository<ErrorRecord, Long> 
     
     // 查询某学生某知识点的错题
     List<ErrorRecord> findByStudentAndKnowledgePoint(Student student, KnowledgePoint knowledgePoint);
-    
+ @Modifying
+    @Query("DELETE FROM ErrorRecord skm WHERE skm.student.id = :studentId")
+    void deleteByStudentId(Long studentId);
     // 查询班级高频错题（按知识点统计）
     @Query("SELECT e.knowledgePoint.id, COUNT(e) as errorCount " +
            "FROM ErrorRecord e " +

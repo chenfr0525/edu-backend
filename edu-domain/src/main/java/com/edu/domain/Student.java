@@ -3,9 +3,12 @@ package com.edu.domain;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
+
 import javax.persistence.*;
 import java.time.LocalDateTime;
 
+@Builder
 @Data
 @Entity
 @Table(name = "student")

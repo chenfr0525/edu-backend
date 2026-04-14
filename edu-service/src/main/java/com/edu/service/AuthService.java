@@ -126,9 +126,17 @@ public class AuthService {
        public Map<String, Object> getUserInfo() {
         User user = userRepository.findByUsername(jwtUtils.extractUsername(jwtUtils.getToken()))
                 .orElseThrow(() -> new RuntimeException("User not found"));
+        Student student = studentService.findByUserId(user.getId())
+                .orElse(null);
         Map<String, Object> userInfo = new HashMap<>();
-        userInfo.put("user", user);
+        userInfo.put("user", student);
         return userInfo;
+       }
+
+        public User getUser() {
+        User user = userRepository.findByUsername(jwtUtils.extractUsername(jwtUtils.getToken()))
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        return user;
        }
 
        /**

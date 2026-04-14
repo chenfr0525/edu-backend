@@ -3,6 +3,7 @@ package com.edu.repository;
 import com.edu.domain.ActivityRecord;
 import com.edu.domain.Student;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -15,6 +16,9 @@ import java.util.List;
 @Repository
 public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, Long> {
     List<ActivityRecord> findByStudent(Student student);
+ @Modifying
+    @Query("DELETE FROM ActivityRecord skm WHERE skm.student.id = :studentId")
+    void deleteByStudentId(Long studentId);
 
      // 查询某学生在某段时间的活动记录
     List<ActivityRecord> findByStudentAndActivityDateBetween(Student student, LocalDateTime start, LocalDateTime end);
@@ -37,5 +41,5 @@ public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, 
     // 统计某学生本月学习总时长 - 修正：使用关联对象
     @Query("SELECT COALESCE(SUM(a.studyDuration), 0) FROM ActivityRecord a " +
            "WHERE a.student.id = :studentId AND a.activityDate >= :startDate")
-    Integer getTotalStudyDuration(@Param("studentId") Long studentId, @Param("startDate") LocalDate startDate);
+    Integer getTotalStudyDuration(@Param("studentId") Long studentId, @Param("startDate") LocalDateTime startDate);
 }

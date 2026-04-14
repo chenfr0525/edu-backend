@@ -2,11 +2,8 @@ package com.edu.web.controller;
 
 import com.edu.common.Result;
 import com.edu.domain.*;
-import com.edu.service.ActivityAlertService;
 import com.edu.service.ActivityRecordService;
 import com.edu.service.AiAnalysisReportService;
-import com.edu.service.ClassService;
-import com.edu.service.CourseService;
 import com.edu.service.EnrollmentService;
 import com.edu.service.ExamGradeService;
 import com.edu.service.ExamService;
@@ -38,7 +35,6 @@ public class StudentDashboardController {
     private final KnowledgePointScoreDetailService kpScoreDetailService;
     private final AiAnalysisReportService aiReportService;
     private final ScorePredictionService predictionService;
-    private final CourseService courseService;
     private final ExamService examService;
     private final EnrollmentService enrollmentService;
     

@@ -67,6 +67,7 @@ public class ActivityRecordService {
     }
     
     public Integer getStudentStudyDuration(Long studentId, LocalDate startDate) {
-        return activityRecordRepository.getTotalStudyDuration(studentId, startDate);
+      LocalDateTime startDateTime = startDate.atStartOfDay();
+        return activityRecordRepository.getTotalStudyDuration(studentId, startDateTime);
     }
 }

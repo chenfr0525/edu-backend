@@ -12,7 +12,7 @@ public interface ClassRepository extends JpaRepository<ClassInfo, Long> {
   List<ClassInfo> findByTeacher(Teacher teacher);
 
   Optional<ClassInfo> findByName(String name);
-  Optional<ClassInfo> findById(Long id);
+  Optional<ClassInfo> findById(String id);
 
   List<ClassInfo> findAllByGrade(String grade);
   

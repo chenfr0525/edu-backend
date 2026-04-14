@@ -5,6 +5,7 @@ import com.edu.domain.Enrollment;
 import com.edu.domain.Student;
 import com.edu.domain.Semester;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -14,7 +15,9 @@ import java.util.Optional;
 public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
     List<Enrollment> findByStudent(Student student);
     List<Enrollment> findByStudentAndSemester(Student student, Semester semester);
-
+ @Modifying
+    @Query("DELETE FROM Enrollment skm WHERE skm.student.id = :studentId")
+     void deleteByStudentId(Long studentId);
     List<Enrollment> findByStudentAndCourse(Student student, Course course);
         // 查询某课程的所有学生
     List<Enrollment> findByCourse(Course course);

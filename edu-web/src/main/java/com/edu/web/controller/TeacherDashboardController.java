@@ -2,9 +2,20 @@ package com.edu.web.controller;
 
 import com.edu.common.Result;
 import com.edu.domain.*;
+import com.edu.domain.dto.ActivityMonitorDTO;
+import com.edu.domain.dto.AiAnalysisReportDTO;
+import com.edu.domain.dto.ClassScoreDistributionDTO;
+import com.edu.domain.dto.DashboardStatsDTO;
+import com.edu.domain.dto.TeachingDashboardDataDTO;
+import com.edu.domain.dto.WeakKnowledgePointDTO;
+import com.edu.domain.dto.WrongQuestionDTO;
+import com.edu.repository.ClassRepository;
+import com.edu.repository.CourseRepository;
 import com.edu.service.ActivityAlertService;
 import com.edu.service.ActivityRecordService;
 import com.edu.service.AiAnalysisReportService;
+import com.edu.service.AiReportGenerationService;
+import com.edu.service.AuthService;
 import com.edu.service.ClassService;
 import com.edu.service.ClassWrongQuestionStatsService;
 import com.edu.service.CourseService;
@@ -14,12 +25,15 @@ import com.edu.service.HomeworkService;
 import com.edu.service.StudentKnowledgeMasteryService;
 import com.edu.service.StudentService;
 import com.edu.service.SubmissionService;
+import com.edu.service.TeachingDashboardService;
 
 import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -38,6 +52,12 @@ public class TeacherDashboardController {
     private final HomeworkService homeworkService;
     private final SubmissionService submissionService;
     private final CourseService courseService;
+     private final TeachingDashboardService dashboardService;
+    private final AiReportGenerationService aiReportGenerationService;
+    private final AuthService authService;
+     private final ClassRepository classRepository;
+     private final CourseRepository courseRepository;
+    
     
     /**
      * 班级教学看板
@@ -596,6 +616,267 @@ public class TeacherDashboardController {
         }
         
         return sb.toString();
+    }
+
+    /**
+     * 获取教师可见的班级列表
+     */
+    @GetMapping("/classes")
+     @PreAuthorize("isAuthenticated()")
+    public Result<List<Map<String, Object>>> getTeacherClasses() {
+          User currentUser = authService.getUser();
+         List<ClassInfo> classes;
+        
+        if ("ADMIN".equals(currentUser.getRole().name())) {
+            classes = dashboardService.getAllClasses();
+        } else {
+            Long teacherId = currentUser.getId();
+            classes = dashboardService.getTeacherClasses(teacherId);
+        }
+        
+        List<Map<String, Object>> result = classes.stream()
+            .map(c ->
+                 {
+                Map<String, Object> map = new HashMap<>();
+                    map.put("id", c.getId());
+                    map.put("name", c.getName());
+                    map.put( "grade", c.getGrade());
+                    return map;
+            } )
+            .collect(java.util.stream.Collectors.toList());
+        
+        return Result.success(result);
+    }
+
+    /**
+     * 获取教师可见的课程列表
+     */
+    @GetMapping("/courses")
+   @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public Result<List<Map<String, Object>>> getTeacherCourses() {
+       User currentUser = authService.getUser();
+        List<Course> courses;
+        
+        if ("ADMIN".equals(currentUser.getRole().name())) {
+            courses = dashboardService.getAllCourses();
+        } else {
+            Long teacherId = currentUser.getId();
+            courses = dashboardService.getTeacherCourses(teacherId);
+        }
+        
+        List<Map<String, Object>> result = courses.stream()
+            .map(c -> {
+                Map<String, Object> map = new HashMap<>();
+                    map.put("id", c.getId());
+                    map.put("name", c.getName());
+                    map.put("credit", c.getCredit());
+                    return map;
+            })
+            .collect(java.util.stream.Collectors.toList());
+        
+        return Result.success(result);
+    }
+
+    /**
+     * 获取教学看板数据（核心接口）
+     * GET /api/dashboard/teaching/data?classId=1&courseId=2
+     */
+    @GetMapping("/data")
+      @PreAuthorize("isAuthenticated()")
+    public Result<TeachingDashboardDataDTO> getDashboardData(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+        User currentUser = authService.getUser();
+        
+        TeachingDashboardDataDTO data = dashboardService.getDashboardData(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId
+        );
+        
+        return Result.success(data);
+    }
+
+    /**
+     * 获取状态卡片数据
+     * GET /api/dashboard/teaching/stats?classId=1&courseId=2
+     */
+    @GetMapping("/stats")
+      @PreAuthorize("isAuthenticated()")
+    public Result<DashboardStatsDTO> getDashboardStats(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+        User currentUser = authService.getUser();
+        
+        TeachingDashboardDataDTO data = dashboardService.getDashboardData(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId
+        );
+        
+        return Result.success(data.getStats());
+    }
+
+    /**
+     * 获取成绩分布数据
+     * GET /api/dashboard/teaching/score-distribution?classId=1&courseId=2
+     */
+    @GetMapping("/score-distribution")
+     @PreAuthorize("isAuthenticated()")
+    public Result<List<ClassScoreDistributionDTO>> getScoreDistribution(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+       User currentUser = authService.getUser();
+        
+        TeachingDashboardDataDTO data = dashboardService.getDashboardData(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId
+        );
+        
+        return Result.success(data.getScoreDistributions());
+    }
+
+    /**
+     * 获取高频错题排行
+     * GET /api/dashboard/teaching/wrong-questions?classId=1&courseId=2
+     */
+    @GetMapping("/wrong-questions")
+     @PreAuthorize("isAuthenticated()")
+    public Result<List<WrongQuestionDTO>> getTopWrongQuestions(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+        User currentUser = authService.getUser();
+        
+        TeachingDashboardDataDTO data = dashboardService.getDashboardData(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId
+        );
+        
+        return Result.success(data.getTopWrongQuestions());
+    }
+
+    /**
+     * 获取薄弱知识点
+     * GET /api/dashboard/teaching/weak-points?classId=1&courseId=2
+     */
+    @GetMapping("/weak-points")
+     @PreAuthorize("isAuthenticated()")
+    public Result<List<WeakKnowledgePointDTO>> getWeakKnowledgePoints(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+        User currentUser = authService.getUser();
+        
+        TeachingDashboardDataDTO data = dashboardService.getDashboardData(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId
+        );
+        
+        return Result.success(data.getWeakKnowledgePoints());
+    }
+
+    /**
+     * 获取活跃度监控数据
+     * GET /api/dashboard/teaching/activity?classId=1&courseId=2
+     */
+    @GetMapping("/activity")
+     @PreAuthorize("isAuthenticated()")
+    public Result<ActivityMonitorDTO> getActivityMonitor(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+       User currentUser = authService.getUser();
+        
+        TeachingDashboardDataDTO data = dashboardService.getDashboardData(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId
+        );
+        
+        return Result.success(data.getActivityMonitor());
+    }
+
+    /**
+     * 生成AI分析报告（单独接口，独立调用）
+     * POST /api/dashboard/teaching/ai-report?classId=1&courseId=2
+     */
+    @PostMapping("/ai-report")
+     @PreAuthorize("isAuthenticated()")
+    public Result<AiAnalysisReportDTO> generateAiReport(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId,
+            @RequestParam(defaultValue = "COMPREHENSIVE") String reportType) {
+        
+       User currentUser = authService.getUser();
+        
+        AiAnalysisReportDTO report = aiReportGenerationService.generateReport(
+            currentUser.getId(),
+            currentUser.getRole().name(),
+            classId,
+            courseId,
+            reportType
+        );
+        
+        return Result.success(report);
+    }
+
+    /**
+     * 获取最新的AI分析报告
+     * GET /api/dashboard/teaching/ai-report/latest?classId=1&courseId=2
+     */
+    @GetMapping("/ai-report/latest")
+     @PreAuthorize("isAuthenticated()")
+    public Result<AiAnalysisReportDTO> getLatestAiReport(
+            @RequestParam(required = false) Long classId,
+            @RequestParam(required = false) Long courseId) {
+        
+        User currentUser = authService.getUser();
+        
+        // 从数据库获取最新的报告
+        String targetType = classId != null ? "CLASS" : "COURSE";
+        Long targetId = classId != null ? classId : courseId;
+        
+        AiAnalysisReport report = aiReportService.findLatestReport(targetType, targetId, "COMPREHENSIVE");
+        
+        if (report == null) {
+            return Result.error("暂无AI分析报告，请先调用生成接口");
+        }
+        
+        // 获取目标名称
+        String targetName = "";
+        if (classId != null) {
+            ClassInfo classInfo = classRepository.findById(classId).orElse(null);
+            if (classInfo != null) targetName = classInfo.getName();
+        } else if (courseId != null) {
+            Course course = courseRepository.findById(courseId).orElse(null);
+            if (course != null) targetName = course.getName();
+        }
+        
+        AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
+            .reportId(report.getId())
+            .targetType(report.getTargetType())
+            .targetId(report.getTargetId())
+            .targetName(targetName)
+            .reportType(report.getReportType())
+            .summary(report.getSummary())
+            .suggestions(report.getSuggestions())
+            .createdAt(report.getCreatedAt())
+            .build();
+        
+        return Result.success(dto);
     }
 
 }

@@ -4,8 +4,11 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
+
 import java.time.LocalDateTime;
 
+@Builder
 @Entity
 @Table(name = "users")
 @Data

@@ -1,6 +1,8 @@
 package com.edu.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import com.edu.domain.Course;
@@ -14,7 +16,9 @@ import java.util.List;
 public interface ScorePredictionRepository extends JpaRepository<ScorePrediction, Long> {
     // 查询某学生某课程的最新预测
     ScorePrediction findFirstByStudentAndCourseOrderByPredictionDateDesc(Student student, Course course);
-    
+     @Modifying
+    @Query("DELETE FROM ScorePrediction skm WHERE skm.student.id = :studentId")
+    void deleteByStudentId(Long studentId);
     // 查询某学生的所有预测
     List<ScorePrediction> findByStudent(Student student);
     

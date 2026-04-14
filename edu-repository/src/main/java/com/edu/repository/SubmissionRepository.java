@@ -4,6 +4,7 @@ import com.edu.domain.Submission;
 import com.edu.domain.Student;
 import com.edu.domain.Homework;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,6 +17,9 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     
     // 查询某作业的所有提交
     List<Submission> findByHomework(Homework homework);
+ @Modifying
+    @Query("DELETE FROM Submission skm WHERE skm.student.id = :studentId")
+    void deleteByStudentId(Long studentId);
     
     // 查询某学生某作业的提交
     Submission findByHomeworkAndStudent(Homework homework, Student student);

@@ -38,7 +38,7 @@ public class ExamService {
         return examRepository.findByClassInfo(classInfo);
     }
     
-    public List<Exam> findByType(String type) {
+    public List<Exam> findByType(ExamStatus type) {
         return examRepository.findByType(type);
     }
     

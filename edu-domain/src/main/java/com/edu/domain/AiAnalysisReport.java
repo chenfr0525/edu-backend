@@ -7,12 +7,14 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 
 @Entity
 @Table(name = "ai_analysis_report")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class AiAnalysisReport {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

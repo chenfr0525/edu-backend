@@ -45,9 +45,7 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
     
     // 查询未截止的作业
     List<Homework> findByDeadlineAfterAndStatus(LocalDateTime now, String status);
-    
-    // 查询某课程未批改的作业
-    List<Homework> findByCourseAndStatus(Course course, String status);
+
     
     // 统计某课程作业平均分
     @Query("SELECT AVG(h.avgScore) FROM Homework h WHERE h.course.id = :courseId")

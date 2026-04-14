@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,7 +43,6 @@ public interface StudentRepository extends JpaRepository<Student, Long> {
     
     // 根据班级查询
     Page<Student> findByClassName(String className, Pageable pageable);
-    
     // 检查学号是否存在
     boolean existsByStudentNo(String studentNo);
 
@@ -65,4 +65,84 @@ public interface StudentRepository extends JpaRepository<Student, Long> {
      */
     @Query("SELECT COUNT(DISTINCT e.student) FROM Enrollment e WHERE e.course = :course")
     long countByEnrollmentsCourse(@Param("course") Course course);
+/**
+ * 根据班级列表查询学生（分页）
+ */
+@Query("SELECT s FROM Student s WHERE s.classInfo.id IN :classIds")
+Page<Student> findByClassIds(@Param("classIds") List<Long> classIds, Pageable pageable);
+
+/**
+ * 根据班级列表和关键词模糊查询
+ */
+@Query("SELECT s FROM Student s WHERE s.classInfo.id IN :classIds " +
+       "AND (s.studentNo LIKE %:keyword% " +
+       "OR s.user.name LIKE %:keyword% " +
+       "OR s.user.username LIKE %:keyword%)")
+Page<Student> findByClassIdsAndKeyword(@Param("classIds") List<Long> classIds, 
+                                        @Param("keyword") String keyword, 
+                                        Pageable pageable);
+
+/**
+ * 根据课程查询学生（通过选课关联）
+ */
+@Query("SELECT DISTINCT s FROM Student s " +
+       "JOIN Enrollment e ON e.student = s " +
+       "WHERE e.course.id = :courseId")
+Page<Student> findByCourseId(@Param("courseId") Long courseId, Pageable pageable);
+
+/**
+ * 根据课程和关键词模糊查询
+ */
+@Query("SELECT DISTINCT s FROM Student s " +
+       "JOIN Enrollment e ON e.student = s " +
+       "WHERE e.course.id = :courseId " +
+       "AND (s.studentNo LIKE %:keyword% " +
+       "OR s.user.name LIKE %:keyword% " +
+       "OR s.user.username LIKE %:keyword%)")
+Page<Student> findByCourseIdAndKeyword(@Param("courseId") Long courseId,
+                                        @Param("keyword") String keyword,
+                                        Pageable pageable);
+
+/**
+ * 统计活跃学生数（近7天有活动记录）
+ */
+@Query("SELECT COUNT(DISTINCT a.student) FROM ActivityRecord a " +
+       "WHERE a.activityDate >= :startDate")
+Long countActiveStudents(@Param("startDate") LocalDate startDate);
+
+/**
+ * 统计低活跃度学生（活跃度得分低于阈值）
+ */
+@Query("SELECT COUNT(DISTINCT a.student) FROM ActivityRecord a " +
+       "GROUP BY a.student " +
+       "HAVING COALESCE(SUM(a.activityScore), 0) < :threshold")
+Long countLowActivityStudents(@Param("threshold") Double threshold);
+
+/**
+ * 统计有薄弱知识点的学生数
+ */
+@Query("SELECT COUNT(DISTINCT skm.student) FROM StudentKnowledgeMastery skm " +
+       "WHERE skm.masteryLevel < 60")
+Long countStudentsWithWeakPoints();
+
+/**
+ * 统计男生/女生人数
+ */
+@Query("SELECT COUNT(s) FROM Student s WHERE s.user.gender = '男'")
+Long countMaleStudents();
+
+@Query("SELECT COUNT(s) FROM Student s WHERE s.user.gender = '女'")
+Long countFemaleStudents();
+
+/**
+ * 获取所有学生（用于管理员统计）
+ */
+@Query("SELECT s FROM Student s")
+List<Student> findAllStudents();
+
+/**
+ * 根据班级ID列表获取所有学生（用于统计）
+ */
+@Query("SELECT s FROM Student s WHERE s.classInfo.id IN :classIds")
+List<Student> findAllByClassIds(@Param("classIds") List<Long> classIds);
 }

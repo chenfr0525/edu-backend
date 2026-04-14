@@ -23,7 +23,7 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     List<Exam> findByCourse(Course course);
     
     // 根据类型查询
-    List<Exam> findByType(String type);
+    List<Exam> findByType(ExamStatus type);
     
     // 查询即将到来的考试
     List<Exam> findByExamDateAfterAndStatus(LocalDateTime date, ExamStatus status);
@@ -59,6 +59,16 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     List<Exam> findByStudentIdAndCourseId(@Param("studentId") Long studentId, 
                                            @Param("courseId") Long courseId);
     
+                                            /**
+     * 根据学生ID获取
+     */
+    @Query("SELECT e FROM Exam e " +
+           "WHERE e.classInfo.id IN (" +
+           "  SELECT s.classInfo.id FROM Student s WHERE s.id = :studentId" +
+           ") " +
+           "ORDER BY e.examDate ASC")
+    List<Exam> findByStudentId(@Param("studentId") Long studentId);
+
     /**
      * 获取即将到来的考试
      */

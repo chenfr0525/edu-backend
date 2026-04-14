@@ -222,7 +222,7 @@ public class HomeworkAnalysisService {
         }
         
         // 尝试从数据库获取已有的分析报告
-        AiAnalysisReport existingReport = aiReportService.findLatestReport("OVERALL", 1L, "HOMEWORK");
+        AiAnalysisReport existingReport = aiReportService.findLatestReport("STUDENT", 1L, "HOMEWORK");
         
         if (existingReport != null && existingReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
             // 7天内的报告直接返回
@@ -242,7 +242,7 @@ public class HomeworkAnalysisService {
         
         // 存储到数据库
         AiAnalysisReport report = new AiAnalysisReport();
-        report.setTargetType("OVERALL");
+        report.setTargetType("STUNDET");
         report.setTargetId(1L);
         report.setSemester(getCurrentSemester());
         report.setReportType("HOMEWORK");

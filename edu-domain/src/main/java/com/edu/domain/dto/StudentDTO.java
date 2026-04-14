@@ -20,7 +20,7 @@ public class StudentDTO {
     private String studentNo;   // 学号
     private String name;        // 姓名
     private String username;    // 用户名
-    private String className;   // 班级
+    private Long classId;   // 班级
     private String grade;       // 年级
     private String email;       // 邮箱
     private String gender;       // 性别
@@ -44,8 +44,8 @@ public class StudentDTO {
             this.avatar = user.getAvatar();
             this.status = user.getStatus().ordinal();
         }
-        if(className != null) {
-            this.className = className;
+        if(classId != null) {
+            this.classId = classId;
         }
     }
 }

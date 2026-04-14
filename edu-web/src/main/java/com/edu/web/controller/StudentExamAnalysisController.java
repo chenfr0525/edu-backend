@@ -3,6 +3,7 @@ package com.edu.web.controller;
 import com.edu.common.PageResult;
 import com.edu.common.Result;
 import com.edu.domain.*;
+import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.ExamStatisticsCards;
 import com.edu.domain.dto.ExamTrendData;
 import com.edu.domain.dto.StudentExamDTO;
@@ -97,4 +98,17 @@ public class StudentExamAnalysisController {
         List<Map<String, Object>> upcomingExams = analysisService.getUpcomingExams(studentId);
         return Result.success(upcomingExams);
     }
+
+    /**
+ * 7. 手动刷新 AI 分析报告
+ * POST /api/analysis/student/exam/refresh/{studentId}/{examId}
+ */
+@PostMapping("/refresh/{studentId}/{examId}")
+public Result<AiSuggestionDTO> refreshAiAnalysis(
+        @PathVariable Long studentId,
+        @PathVariable Long examId) {
+    
+    AiSuggestionDTO suggestion = analysisService.refreshExamAiAnalysis(studentId, examId);
+    return Result.success(suggestion);
+}
 }

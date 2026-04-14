@@ -6,6 +6,7 @@ import com.edu.domain.ExamGrade;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -22,7 +23,9 @@ public interface ExamGradeRepository extends JpaRepository<ExamGrade, Long> {
 
   // 查询某学生的所有成绩
     List<ExamGrade> findByStudent(Student student);
-    
+     @Modifying
+    @Query("DELETE FROM ExamGrade skm WHERE skm.student.id = :studentId")
+    void deleteByStudentId(Long studentId);
   List<ExamGrade> findByExam(Exam exam); 
     
     // 查询学生历次考试成绩（用于趋势图）
@@ -88,4 +91,22 @@ public interface ExamGradeRepository extends JpaRepository<ExamGrade, Long> {
            "WHERE eg.student.id = :studentId " +
            "AND eg.score > (SELECT AVG(eg2.score) FROM ExamGrade eg2 WHERE eg2.exam.id = eg.exam.id)")
     Long countAboveClassAvg(@Param("studentId") Long studentId);
+
+/**
+ * 获取某班级某课程的所有成绩（用于统计）
+ */
+@Query("SELECT eg FROM ExamGrade eg " +
+       "WHERE eg.student.classInfo.id = :classId " +
+       "AND eg.exam.course.id = :courseId " +
+       "AND eg.score IS NOT NULL")
+List<ExamGrade> findByClassIdAndCourseId(@Param("classId") Long classId, 
+                                          @Param("courseId") Long courseId);
+/**
+ * 获取某课程下所有班级的成绩
+ */
+@Query("SELECT eg FROM ExamGrade eg " +
+       "WHERE eg.exam.course.id = :courseId " +
+       "AND eg.score IS NOT NULL")
+List<ExamGrade> findByCourseId(@Param("courseId") Long courseId);
+
 }
