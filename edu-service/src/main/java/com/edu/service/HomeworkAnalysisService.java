@@ -224,7 +224,7 @@ public class HomeworkAnalysisService {
         // 尝试从数据库获取已有的分析报告
         AiAnalysisReport existingReport = aiReportService.findLatestReport("STUDENT", 1L, "HOMEWORK");
         
-        if (existingReport != null && existingReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
+        if (existingReport != null && existingReport.getCreatedAt().isAfter(LocalDateTime.now().minusSeconds(6))) {
             // 7天内的报告直接返回
             
              Map<String, Object> analysisData = new HashMap<>();

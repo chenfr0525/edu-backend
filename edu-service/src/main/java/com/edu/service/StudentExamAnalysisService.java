@@ -748,23 +748,32 @@ public class StudentExamAnalysisService {
         try {
             Long kpIdLong = Long.parseLong(kpId);
             String kpName = getKnowledgePointName(kpIdLong);
+
+            double myRate = myScore * 10.0; 
             
-            ExamKnowledgePointDTO dto = new ExamKnowledgePointDTO();
-            dto.setKnowledgePointId(kpIdLong);
-            dto.setKnowledgePointName(kpName != null ? kpName : "知识点-" + kpId);
-            dto.setMyScore(myScore);
-            dto.setFullScore(10);
-            
-            // 计算得分率（避免除以0）
-            double myRate = myScore * 10.0;
-            dto.setScoreRate(BigDecimal.valueOf(myRate).setScale(2, RoundingMode.HALF_UP));
-            
-            // 班级平均分
             BigDecimal classAvg = classAvgRates.getOrDefault(kpId, BigDecimal.ZERO);
-            dto.setClassAvgRate(classAvg);
-            
-            // 设置等级和建议
-            setLevelAndSuggestion(dto, myRate);
+            String level;
+            String suggestion;
+                if (myRate >= 80) {
+                level="GOOD";
+                suggestion="✅ 掌握良好，继续保持";
+                } else if (myRate >= 60) {
+                level="MODERATE";
+                suggestion="📚 基本掌握，建议加强练习";
+                } else {
+                level="WEAK";
+                suggestion="🔴 薄弱知识点，需要重点复习";
+            }
+        
+            ExamKnowledgePointDTO dto = ExamKnowledgePointDTO.builder()
+                .knowledgePointId(kpIdLong).knowledgePointName(kpName != null ? kpName : "知识点-" + kpId)
+                .myScore(myScore)
+                .fullScore(10)  // fullScore 是 Integer 类型，直接传 10
+                .scoreRate(BigDecimal.valueOf(myRate).setScale(2, RoundingMode.HALF_UP))
+                .classAvgRate(classAvg)  // classAvg 是 BigDecimal 类型
+                .level(level)
+                .suggestion(suggestion) // 根据得分率计算
+                .build();
             
             result.add(dto);
         } catch (NumberFormatException e) {
@@ -780,21 +789,7 @@ public class StudentExamAnalysisService {
     return result;
 }
 
-/**
- * 设置等级和建议
- */
-private void setLevelAndSuggestion(ExamKnowledgePointDTO dto, double myRate) {
-    if (myRate >= 80) {
-        dto.setLevel("GOOD");
-        dto.setSuggestion("✅ 掌握良好，继续保持");
-    } else if (myRate >= 60) {
-        dto.setLevel("MODERATE");
-        dto.setSuggestion("📚 基本掌握，建议加强练习");
-    } else {
-        dto.setLevel("WEAK");
-        dto.setSuggestion("🔴 薄弱知识点，需要重点复习");
-    }
-}
+
     
    private ExamScoreAnalysisDTO getExamScoreAnalysis(Long studentId, Exam exam) {
     ExamScoreAnalysisDTO analysis = new ExamScoreAnalysisDTO();

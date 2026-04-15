@@ -3,7 +3,8 @@ package com.edu.repository;
 import com.edu.domain.Student;
 import com.edu.domain.Exam;
 import com.edu.domain.ExamGrade;
-import org.springframework.data.domain.PageRequest;
+
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -16,6 +17,13 @@ import java.util.Optional;
 public interface ExamGradeRepository extends JpaRepository<ExamGrade, Long> {
   
   List<ExamGrade> findByExamAndStudent(Exam exam, Student student);
+
+  void deleteByExam(Exam exam);
+
+  @Query("select e from ExamGrade e where e.exam.id = :examId ")
+   List<ExamGrade> findStudentGradesByExamId(@Param("examId") Long examId);
+
+
 
   List<ExamGrade> findByExamInAndStudent(List<Exam> exams, Student student);
 
@@ -109,4 +117,38 @@ List<ExamGrade> findByClassIdAndCourseId(@Param("classId") Long classId,
        "AND eg.score IS NOT NULL")
 List<ExamGrade> findByCourseId(@Param("courseId") Long courseId);
 
+// ExamGradeRepository.java 新增方法
+
+/**
+ * 分页获取考试的学生成绩列表
+ */
+ @Query(value = "SELECT eg FROM ExamGrade eg LEFT JOIN FETCH eg.student s LEFT JOIN FETCH s.user u WHERE eg.exam.id = :examId",
+           countQuery = "SELECT COUNT(eg) FROM ExamGrade eg WHERE eg.exam.id = :examId")
+    Page<ExamGrade> findByExamIdWithStudent(@Param("examId") Long examId, Pageable pageable);
+
+/**
+ * 分页获取考试的学生成绩列表（带关键词搜索）
+ */
+@Query("SELECT eg FROM ExamGrade eg " +
+       "JOIN eg.student s " +
+       "JOIN s.user u " +
+       "WHERE eg.exam.id = :examId " +
+       "AND (s.studentNo LIKE %:keyword% OR u.name LIKE %:keyword%)")
+Page<ExamGrade> findByExamIdAndKeyword(@Param("examId") Long examId,
+                                        @Param("keyword") String keyword,
+                                        Pageable pageable);
+
+/**
+ * 统计考试的成绩分布
+ */
+@Query("SELECT COUNT(eg) FROM ExamGrade eg WHERE eg.exam.id = :examId AND eg.score >= :score")
+Long countByExamIdAndScoreGreaterThanEqual(@Param("examId") Long examId, 
+                                            @Param("score") Double score);
+
+/**
+ * 获取考试的成绩统计
+ */
+@Query("SELECT AVG(eg.score), MAX(eg.score), MIN(eg.score), COUNT(eg) " +
+       "FROM ExamGrade eg WHERE eg.exam.id = :examId AND eg.score IS NOT NULL")
+Object[] getScoreStatistics(@Param("examId") Long examId);
 }

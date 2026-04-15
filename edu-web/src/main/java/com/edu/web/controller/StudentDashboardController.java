@@ -9,6 +9,7 @@ import com.edu.service.ExamGradeService;
 import com.edu.service.ExamService;
 import com.edu.service.KnowledgePointScoreDetailService;
 import com.edu.service.ScorePredictionService;
+import com.edu.service.StudentDashboardAiService;
 import com.edu.service.StudentKnowledgeMasteryService;
 import com.edu.service.StudentService;
 import com.edu.service.SubmissionService;
@@ -37,6 +38,7 @@ public class StudentDashboardController {
     private final ScorePredictionService predictionService;
     private final ExamService examService;
     private final EnrollmentService enrollmentService;
+    private final StudentDashboardAiService studentDashboardAiService;
     
     /**
      * 学生个人驾驶舱 - 完整数据
@@ -161,15 +163,16 @@ public class StudentDashboardController {
             dashboard.put("activityWarningLevel", "GOOD");
         }
         
-        // 13. AI 生成的个性化建议
-        AiAnalysisReport latestReport = aiReportService.findLatestReport("STUDENT", studentId, "COMPREHENSIVE");
-        if (latestReport != null) {
-            dashboard.put("aiSuggestions", latestReport.getSuggestions());
-            dashboard.put("aiSummary", latestReport.getSummary());
-        } else {
-            dashboard.put("aiSuggestions", "暂无AI分析建议，请先上传作业或考试数据");
-            dashboard.put("aiSummary", "数据不足，无法生成分析报告");
-        }
+        AiAnalysisReport aiReport = studentDashboardAiService.getOrCreateDashboardReport(studentId);
+if (aiReport != null) {
+    dashboard.put("aiSuggestions", aiReport.getSuggestions());
+    dashboard.put("aiSummary", aiReport.getSummary());
+    dashboard.put("aiGeneratedAt", aiReport.getCreatedAt());
+} else {
+    dashboard.put("aiSuggestions", "暂无AI分析建议，请稍后重试");
+    dashboard.put("aiSummary", "数据不足，无法生成分析报告");
+    dashboard.put("aiGeneratedAt", null);
+}
         
         // 14. 各科成绩预测
         List<Enrollment> enrollments = enrollmentService.findByStudent(student);
@@ -414,4 +417,19 @@ public class StudentDashboardController {
         }
         return "继续努力，相信你能取得更好的成绩！";
     }
+
+    /**
+ * 手动刷新 Dashboard AI 分析报告
+ * POST /api/dashboard/student/refresh/{studentId}
+ */
+@PostMapping("/refresh/{studentId}")
+public Result<AiAnalysisReport> refreshDashboardAi(@PathVariable Long studentId) {
+    Student student = studentService.findById(studentId).orElse(null);
+    if (student == null) {
+        return Result.error("学生不存在");
+    }
+    
+    AiAnalysisReport report = studentDashboardAiService.refreshDashboardReport(studentId);
+    return Result.success(report);
+}
 }

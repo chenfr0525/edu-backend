@@ -80,4 +80,7 @@ public interface KnowledgePointScoreDetailRepository extends JpaRepository<Knowl
            "ORDER BY k.createdAt DESC")
     List<KnowledgePointScoreDetail> findAllByStudentIdAndKpId(@Param("studentId") Long studentId,
                                                                @Param("kpId") Long kpId);
+
+         List<KnowledgePointScoreDetail> findBySourceTypeAndSourceIdAndKnowledgePointId(
+        String sourceType, Long sourceId, Long knowledgePointId);
 }

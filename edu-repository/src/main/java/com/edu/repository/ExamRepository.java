@@ -5,6 +5,8 @@ import com.edu.domain.Course;
 import com.edu.domain.Exam;
 import com.edu.domain.ExamStatus;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -80,4 +82,38 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
            "AND e.status != 'COMPLETED' " +
            "ORDER BY e.examDate ASC")
     List<Exam> findUpcomingByStudentId(@Param("studentId") Long studentId);
+
+    /**
+ * 根据班级列表查询考试（分页）
+ */
+@Query("SELECT e FROM Exam e WHERE e.classInfo.id IN :classIds")
+Page<Exam> findByClassIds(@Param("classIds") List<Long> classIds, Pageable pageable);
+
+/**
+ * 根据班级列表和关键词模糊查询
+ */
+@Query("SELECT e FROM Exam e WHERE e.classInfo.id IN :classIds AND e.name LIKE %:keyword%")
+Page<Exam> findByClassIdsAndKeyword(@Param("classIds") List<Long> classIds,
+                                     @Param("keyword") String keyword,
+                                     Pageable pageable);
+
+/**
+ * 根据课程查询考试
+ */
+@Query("SELECT e FROM Exam e WHERE e.course.id = :courseId")
+Page<Exam> findByCourseId(@Param("courseId") Long courseId, Pageable pageable);
+
+/**
+ * 根据课程和关键词模糊查询
+ */
+@Query("SELECT e FROM Exam e WHERE e.course.id = :courseId AND e.name LIKE %:keyword%")
+Page<Exam> findByCourseIdAndKeyword(@Param("courseId") Long courseId,
+                                     @Param("keyword") String keyword,
+                                     Pageable pageable);
+
+/**
+ * 获取某课程的所有考试
+ */
+List<Exam> findByCourseId(Long courseId);
+
 }

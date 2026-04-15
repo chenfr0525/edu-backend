@@ -42,4 +42,22 @@ public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, 
     @Query("SELECT COALESCE(SUM(a.studyDuration), 0) FROM ActivityRecord a " +
            "WHERE a.student.id = :studentId AND a.activityDate >= :startDate")
     Integer getTotalStudyDuration(@Param("studentId") Long studentId, @Param("startDate") LocalDateTime startDate);
+
+    /**
+ * 查询某学生在指定日期之后的活动记录
+ */
+@Query("SELECT a FROM ActivityRecord a WHERE a.student.id = :studentId AND a.activityDate >= :startDate")
+List<ActivityRecord> findByStudentIdAndActivityDateAfter(@Param("studentId") Long studentId, @Param("startDate") LocalDate startDate);
+
+/**
+ * 统计某学生在指定日期之后的活跃记录数
+ */
+@Query("SELECT COUNT(a) FROM ActivityRecord a WHERE a.student.id = :studentId AND a.activityDate >= :startDate")
+Long countRecentByStudentId(@Param("studentId") Long studentId, @Param("startDate") LocalDate startDate);
+
+/**
+ * 统计某学生在指定日期之后的学习总时长
+ */
+@Query("SELECT COALESCE(SUM(a.studyDuration), 0) FROM ActivityRecord a WHERE a.student.id = :studentId AND a.activityDate >= :startDate")
+Long sumStudyDurationByStudentId(@Param("studentId") Long studentId, @Param("startDate") LocalDate startDate);
 }

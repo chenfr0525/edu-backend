@@ -37,6 +37,9 @@ public class StudentManageService {
     private final StudentKnowledgeMasteryRepository masteryRepository;
     private final ExamGradeRepository examGradeRepository;
     private final EnrollmentRepository enrollmentRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
+  
 
     // 临时文件存储（实际生产环境可用Redis或数据库）
     private final Map<String, FileImportPreviewVO> tempFileStore = new HashMap<>();
@@ -575,6 +578,7 @@ public class StudentManageService {
         }).start();
     }
 
-    // 需要注入的依赖
-    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    
+
+ 
 }

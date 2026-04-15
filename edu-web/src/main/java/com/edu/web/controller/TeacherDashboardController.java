@@ -25,6 +25,7 @@ import com.edu.service.HomeworkService;
 import com.edu.service.StudentKnowledgeMasteryService;
 import com.edu.service.StudentService;
 import com.edu.service.SubmissionService;
+import com.edu.service.TeacherDashboardAiService;
 import com.edu.service.TeachingDashboardService;
 
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,7 @@ public class TeacherDashboardController {
     private final AuthService authService;
      private final ClassRepository classRepository;
      private final CourseRepository courseRepository;
+     private final TeacherDashboardAiService teacherDashboardAiService;
     
     
     /**
@@ -808,75 +810,133 @@ public class TeacherDashboardController {
         
         return Result.success(data.getActivityMonitor());
     }
-
-    /**
-     * 生成AI分析报告（单独接口，独立调用）
-     * POST /api/dashboard/teaching/ai-report?classId=1&courseId=2
-     */
-    @PostMapping("/ai-report")
-     @PreAuthorize("isAuthenticated()")
-    public Result<AiAnalysisReportDTO> generateAiReport(
-            @RequestParam(required = false) Long classId,
-            @RequestParam(required = false) Long courseId,
-            @RequestParam(defaultValue = "COMPREHENSIVE") String reportType) {
-        
-       User currentUser = authService.getUser();
-        
-        AiAnalysisReportDTO report = aiReportGenerationService.generateReport(
-            currentUser.getId(),
-            currentUser.getRole().name(),
-            classId,
-            courseId,
-            reportType
-        );
-        
-        return Result.success(report);
+// 修改生成 AI 报告接口（POST）
+@PostMapping("/ai-report")
+@PreAuthorize("isAuthenticated()")
+public Result<AiAnalysisReportDTO> generateAiReport(
+        @RequestParam(required = false) Long classId,
+        @RequestParam(required = false) Long courseId,
+        @RequestParam(defaultValue = "COMPREHENSIVE") String reportType) {
+    
+    User currentUser = authService.getUser();
+    
+    String targetType = classId != null ? "CLASS" : "COURSE";
+    Long targetId = classId != null ? classId : courseId;
+    
+    // 使用新的 AI 服务（带缓存）
+    AiAnalysisReport report = teacherDashboardAiService.getOrCreateReport(targetType, targetId, reportType);
+    
+    if (report == null) {
+        return Result.error("生成 AI 报告失败");
     }
-
-    /**
-     * 获取最新的AI分析报告
-     * GET /api/dashboard/teaching/ai-report/latest?classId=1&courseId=2
-     */
-    @GetMapping("/ai-report/latest")
-     @PreAuthorize("isAuthenticated()")
-    public Result<AiAnalysisReportDTO> getLatestAiReport(
-            @RequestParam(required = false) Long classId,
-            @RequestParam(required = false) Long courseId) {
-        
-        User currentUser = authService.getUser();
-        
-        // 从数据库获取最新的报告
-        String targetType = classId != null ? "CLASS" : "COURSE";
-        Long targetId = classId != null ? classId : courseId;
-        
-        AiAnalysisReport report = aiReportService.findLatestReport(targetType, targetId, "COMPREHENSIVE");
-        
-        if (report == null) {
-            return Result.error("暂无AI分析报告，请先调用生成接口");
-        }
-        
-        // 获取目标名称
-        String targetName = "";
-        if (classId != null) {
-            ClassInfo classInfo = classRepository.findById(classId).orElse(null);
-            if (classInfo != null) targetName = classInfo.getName();
-        } else if (courseId != null) {
-            Course course = courseRepository.findById(courseId).orElse(null);
-            if (course != null) targetName = course.getName();
-        }
-        
-        AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
-            .reportId(report.getId())
-            .targetType(report.getTargetType())
-            .targetId(report.getTargetId())
-            .targetName(targetName)
-            .reportType(report.getReportType())
-            .summary(report.getSummary())
-            .suggestions(report.getSuggestions())
-            .createdAt(report.getCreatedAt())
-            .build();
-        
-        return Result.success(dto);
+    
+    // 获取目标名称
+    String targetName = "";
+    if (classId != null) {
+        ClassInfo classInfo = classRepository.findById(classId).orElse(null);
+        if (classInfo != null) targetName = classInfo.getName();
+    } else if (courseId != null) {
+        Course course = courseRepository.findById(courseId).orElse(null);
+        if (course != null) targetName = course.getName();
     }
+    
+    AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
+        .reportId(report.getId())
+        .targetType(report.getTargetType())
+        .targetId(report.getTargetId())
+        .targetName(targetName)
+        .reportType(report.getReportType())
+        .summary(report.getSummary())
+        .suggestions(report.getSuggestions())
+        .createdAt(report.getCreatedAt())
+        .build();
+    
+    return Result.success(dto);
+}
 
+// 修改获取最新 AI 报告接口（GET）
+@GetMapping("/ai-report/latest")
+@PreAuthorize("isAuthenticated()")
+public Result<AiAnalysisReportDTO> getLatestAiReport(
+        @RequestParam(required = false) Long classId,
+        @RequestParam(required = false) Long courseId) {
+    
+    User currentUser = authService.getUser();
+    
+    String targetType = classId != null ? "CLASS" : "COURSE";
+    Long targetId = classId != null ? classId : courseId;
+    
+    // 直接从数据库获取最新的报告（7天内有效）
+    AiAnalysisReport report = teacherDashboardAiService.getOrCreateReport(targetType, targetId, "COMPREHENSIVE");
+    
+    if (report == null) {
+        return Result.error("暂无AI分析报告");
+    }
+    
+    // 获取目标名称
+    String targetName = "";
+    if (classId != null) {
+        ClassInfo classInfo = classRepository.findById(classId).orElse(null);
+        if (classInfo != null) targetName = classInfo.getName();
+    } else if (courseId != null) {
+        Course course = courseRepository.findById(courseId).orElse(null);
+        if (course != null) targetName = course.getName();
+    }
+    
+    AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
+        .reportId(report.getId())
+        .targetType(report.getTargetType())
+        .targetId(report.getTargetId())
+        .targetName(targetName)
+        .reportType(report.getReportType())
+        .summary(report.getSummary())
+        .suggestions(report.getSuggestions())
+        .createdAt(report.getCreatedAt())
+        .build();
+    
+    return Result.success(dto);
+}
+
+// 新增：手动刷新 AI 报告接口
+@PostMapping("/ai-report/refresh")
+@PreAuthorize("isAuthenticated()")
+public Result<AiAnalysisReportDTO> refreshAiReport(
+        @RequestParam(required = false) Long classId,
+        @RequestParam(required = false) Long courseId,
+        @RequestParam(defaultValue = "COMPREHENSIVE") String reportType) {
+    
+    User currentUser = authService.getUser();
+    
+    String targetType = classId != null ? "CLASS" : "COURSE";
+    Long targetId = classId != null ? classId : courseId;
+    
+    // 强制刷新
+    AiAnalysisReport report = teacherDashboardAiService.refreshReport(targetType, targetId, reportType);
+    
+    if (report == null) {
+        return Result.error("刷新 AI 报告失败");
+    }
+    
+    String targetName = "";
+    if (classId != null) {
+        ClassInfo classInfo = classRepository.findById(classId).orElse(null);
+        if (classInfo != null) targetName = classInfo.getName();
+    } else if (courseId != null) {
+        Course course = courseRepository.findById(courseId).orElse(null);
+        if (course != null) targetName = course.getName();
+    }
+    
+    AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
+        .reportId(report.getId())
+        .targetType(report.getTargetType())
+        .targetId(report.getTargetId())
+        .targetName(targetName)
+        .reportType(report.getReportType())
+        .summary(report.getSummary())
+        .suggestions(report.getSuggestions())
+        .createdAt(report.getCreatedAt())
+        .build();
+    
+    return Result.success(dto);
+}
 }
