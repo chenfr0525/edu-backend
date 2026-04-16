@@ -18,13 +18,15 @@ public class StudentKnowledgeMastery {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-     @OneToOne
-    @JoinColumn(name = "student")
+    // 修正：使用 ManyToOne 而不是 OneToOne，因为一个学生可以有多个知识点掌握记录
+    @ManyToOne
+    @JoinColumn(name = "student_id", nullable = false)  // 改为 student_id
     private Student student;
 
-    @OneToOne
+    @ManyToOne  // 改为 ManyToOne，一个知识点可以被多个学生掌握
     @JoinColumn(name = "knowledge_point_id")
     private KnowledgePoint knowledgePoint;
+
 
     @Column(name = "mastery_level")
     private Double masteryLevel = 0.0;

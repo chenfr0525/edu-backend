@@ -32,6 +32,8 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     
     // 查询某班级某课程的考试列表
     List<Exam> findByClassInfoAndCourse(ClassInfo classInfo, Course course);
+
+    boolean existsByClassInfoAndCourseAndName(ClassInfo classInfo, Course course,String name);
     
     // 查询班级考试平均分
     @Query("SELECT AVG(e.classAvgScore) FROM Exam e WHERE e.classInfo.id = :classId")

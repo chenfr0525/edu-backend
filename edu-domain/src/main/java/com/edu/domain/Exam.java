@@ -4,6 +4,7 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class Exam {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -26,7 +28,7 @@ public class Exam {
     private ExamStatus type=ExamStatus.MOCK;
 
     @ManyToOne
-    @JoinColumn(name = "class_id")
+    @JoinColumn(name = "class_id", nullable = true)
     private ClassInfo classInfo;
 
     @ManyToOne

@@ -139,7 +139,7 @@ public class StudentService {
     }
 
      @Transactional
-public Student createStudent(StudentDTO studentDto) {
+    public Student createStudent(StudentDTO studentDto) {
     
     // 检查姓名是否为空
     if (studentDto.getName() == null || studentDto.getName().trim().isEmpty()) {

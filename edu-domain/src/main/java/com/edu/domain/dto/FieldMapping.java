@@ -15,4 +15,5 @@ public class FieldMapping {
     private boolean needExist;       // 是否需要存在性校验（新增）
     private String defaultValue;     // 默认值（新增）
     private String regex;            // 正则校验（新增）
+    private List<String> allowedValues; // 允许的值列表
 }

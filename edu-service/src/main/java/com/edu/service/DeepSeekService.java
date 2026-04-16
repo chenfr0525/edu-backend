@@ -30,7 +30,6 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 @Slf4j
 public class DeepSeekService {
-    private final ClassRepository classInfoRepository;
     private final UserRepository userRepository;
      private final  StudentRepository studentRepository;
     @Value("${deepseek.api.key}")
@@ -218,9 +217,6 @@ public class DeepSeekService {
         
         return response;
     }
-
-    // edu-service/DeepSeekService.java 中添加以下方法
-
 /**
  * 解析文件并提取结构化数据
  * @param fileContent 文件内容（Base64或文本）
@@ -242,7 +238,6 @@ public ParseResult parseFileData(String fileContent, String fileName, String dat
     
     // 3. 解析 AI 返回的 JSON
     ParseResult result = new ParseResult();
-    result.setSessionId(UUID.randomUUID().toString());
     result.setRawResponse(aiResponse);
     
     try {
@@ -322,6 +317,8 @@ private String buildParsePrompt(String fileContent, String fileName, String data
         "5. 严格按照以下JSON格式输出，不要有其他解释：\n" +
          "6. 第一行通常是列名，请智能识别每个列对应哪个目标字段\n" +
          "7. 无论列名是中文、英文还是缩写，都要正确识别\n" +
+         "8. 字母大小写也需要分辨,比如计算机a班也是计算机A班\n" +
+         "8. 数字也需要分辨,比如计算机1班也是计算机一班\n" +
         "{\n" +
         "  \"summary\": \"数据提取摘要，说明提取了多少条记录，主要包含哪些信息\",\n" +
         "  \"data\": [\n" +
@@ -338,7 +335,7 @@ private String buildParsePrompt(String fileContent, String fileName, String data
 /**
  * 验证数据完整性
  */
-private List<ValidationError> validateData(List<Map<String, Object>> dataList, 
+public List<ValidationError> validateData(List<Map<String, Object>> dataList, 
                                             List<FieldMapping> fieldMappings) {
     List<ValidationError> errors = new ArrayList<>();
     
@@ -427,9 +424,6 @@ private List<ValidationError> validateData(List<Map<String, Object>> dataList,
 private boolean checkExistsInDatabase(String field, String value) {
     // 根据字段名调用不同的 repository 方法
     switch (field) {
-        case "classname":
-            // 检查班级是否存在
-            return classInfoRepository.existsByName(value);
         case "studentNo":
             // 检查学号是否已存在（用于更新场景）
             return studentRepository.existsByStudentNo(value);

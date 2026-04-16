@@ -7,7 +7,6 @@ import lombok.Data;
 
 @Data
 public class ParseResult {
-   private String sessionId;                    // 会话ID
     private boolean success;                     // 是否解析成功
     private List<Map<String, Object>> data;      // 解析出的数据列表
     private List<ValidationError> errors;        // 验证错误

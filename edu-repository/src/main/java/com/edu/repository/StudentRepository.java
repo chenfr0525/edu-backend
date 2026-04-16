@@ -3,6 +3,8 @@ package com.edu.repository;
 import com.edu.domain.ClassInfo;
 import com.edu.domain.Course;
 import com.edu.domain.Student;
+import com.edu.domain.User;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,6 +21,8 @@ public interface StudentRepository extends JpaRepository<Student, Long> {
     
     // 根据userid查询
     Optional<Student> findByUserId(Long userId);
+
+    Optional<Student> findByUser(User user);
 
       // 根据年级查询
     List<Student> findByGrade(String grade);

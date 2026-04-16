@@ -5,16 +5,18 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.regex.Pattern;
 
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.edu.domain.ClassInfo;
+import com.edu.domain.Role;
+import com.edu.domain.Student;
+import com.edu.domain.User;
+import com.edu.domain.UserStatus;
 import com.edu.domain.dto.FieldMapping;
 import com.edu.domain.dto.ValidationError;
 import com.edu.repository.ClassRepository;
@@ -26,144 +28,103 @@ import com.edu.repository.UserRepository;
 @Slf4j
 public class StudentImportValidator {
 
-   
+    private final DeepSeekService deepSeekService;
     private final StudentRepository studentRepository;
+    private final ClassRepository classRepository;
     private final UserRepository userRepository;
-    private final ClassRepository classInfoRepository;
-  /**
-     * 验证导入的数据
+    private final PasswordEncoder passwordEncoder;
+    /**
+     * 确认导入学生数据
      */
-    public List<ValidationError> validateStudentData(List<Map<String, Object>> dataList, 
-                                                      List<FieldMapping> mappings) {
-        List<ValidationError> errors = new ArrayList<>();
-        Set<String> studentNos = new HashSet<>();
-        Set<String> usernames = new HashSet<>();
-        
-        for (int i = 0; i < dataList.size(); i++) {
-            Map<String, Object> row = dataList.get(i);
-            
-            for (FieldMapping mapping : mappings) {
-                Object value = row.get(mapping.getTargetField());
-                
-                // 1. 必填校验
-                if (mapping.isRequired() && (value == null || value.toString().trim().isEmpty())) {
-                    errors.add(new ValidationError(i, mapping.getTargetField(), 
-                        String.format("第%d行：必填字段【%s】不能为空", i + 1, mapping.getFieldDescription()),
-                        "required"));
-                    continue;
-                }
-                
-                if (value == null) continue;
-                
-                String strValue = value.toString().trim();
-                
-                // 2. 唯一性校验（学号）
-                if ("studentNo".equals(mapping.getTargetField()) && mapping.isUnique()) {
-                    if (studentNos.contains(strValue)) {
-                        errors.add(new ValidationError(i, mapping.getTargetField(),
-                            String.format("第%d行：学号【%s】在文件中重复", i + 1, strValue),
-                            "unique"));
-                    } else {
-                        // 检查数据库是否已存在
-                        if (studentRepository.existsByStudentNo(strValue)) {
-                            errors.add(new ValidationError(i, mapping.getTargetField(),
-                                String.format("第%d行：学号【%s】已存在于系统中", i + 1, strValue),
-                                "unique"));
-                        } else {
-                            studentNos.add(strValue);
-                        }
-                    }
-                }
-                
-                // 3. 唯一性校验（用户名）
-                if ("username".equals(mapping.getTargetField()) && mapping.isUnique()) {
-                    if (usernames.contains(strValue)) {
-                        errors.add(new ValidationError(i, mapping.getTargetField(),
-                            String.format("第%d行：用户名【%s】在文件中重复", i + 1, strValue),
-                            "unique"));
-                    } else {
-                        if (userRepository.existsByUsername(strValue)) {
-                            errors.add(new ValidationError(i, mapping.getTargetField(),
-                                String.format("第%d行：用户名【%s】已存在于系统中", i + 1, strValue),
-                                "unique"));
-                        } else {
-                            usernames.add(strValue);
-                        }
-                    }
-                }
-                
-                // 4. 班级存在性校验
-                if ("classname".equals(mapping.getTargetField()) && mapping.isNeedExist()) {
-                    Optional<ClassInfo> classInfo = classInfoRepository.findByName(strValue);
-                    if (!classInfo.isPresent()) {
-                        errors.add(new ValidationError(i, mapping.getTargetField(),
-                            String.format("第%d行：班级【%s】不存在，请先创建班级", i + 1, strValue),
-                            "exist"));
-                    }
-                }
-                
-                // 5. 性别校验
-                if ("gender".equals(mapping.getTargetField())) {
-                    if (!"男".equals(strValue) && !"女".equals(strValue)) {
-                        errors.add(new ValidationError(i, mapping.getTargetField(),
-                            String.format("第%d行：性别【%s】无效，只能是男或女", i + 1, strValue),
-                            "format"));
-                    }
-                }
-                
-                // 6. 邮箱格式校验
-                if ("email".equals(mapping.getTargetField()) && !strValue.isEmpty()) {
-                    String emailRegex = "^[A-Za-z0-9+_.-]+@(.+)$";
-                    if (!Pattern.matches(emailRegex, strValue)) {
-                        errors.add(new ValidationError(i, mapping.getTargetField(),
-                            String.format("第%d行：邮箱格式不正确", i + 1),
-                            "format"));
-                    }
-                }
-                
-                // 7. 手机号格式校验
-                if ("phone".equals(mapping.getTargetField()) && !strValue.isEmpty()) {
-                    String phoneRegex = "^1[3-9]\\d{9}$";
-                    if (!Pattern.matches(phoneRegex, strValue)) {
-                        errors.add(new ValidationError(i, mapping.getTargetField(),
-                            String.format("第%d行：手机号格式不正确", i + 1),
-                            "format"));
-                    }
-                }
+    @Transactional
+    public String insertStudentData(List<Map<String, Object>> data) {
+        List<FieldMapping> mappings = getStudentFieldMappings();
+
+        List<ValidationError> errors = deepSeekService.validateData(data,mappings);
+        if (!errors.isEmpty()) {
+            log.error("数据验证失败：{}", errors);
+            StringBuilder sb = new StringBuilder();
+            for (ValidationError error : errors) {
+                sb.append(error.getErrorMessage()).append("\n");
             }
+            log.error("数据验证失败：{}", sb.toString());
+            return sb.toString();
+        }
+             // 2. 批量插入
+                int successCount = 0;
+                int failCount = 0;
+                StringBuilder resultMsg = new StringBuilder();
+            for (Map<String, Object> row : data) {
+            try {
+                insertSingleStudent(row);
+                successCount++;
+                log.info("成功插入学生：{}", row.get("name"));
+            } catch (Exception e) {
+                failCount++;
+                String errorMsg = String.format("插入失败 - 学号：%s，姓名：%s，原因：%s",
+                    row.get("studentNo"), row.get("name"), e.getMessage());
+                log.error(errorMsg);
+                resultMsg.append(errorMsg).append("\n");
+            }
+            }
+           if(failCount > 0){
+        String summary = String.format("插入完成！成功：%d条，失败：%d条", successCount, failCount);
+        log.info(summary);
+    return resultMsg.toString();}
+        return "数据导入成功";
+    }
+
+     /**
+     * 插入单条学生数据
+     */
+    private void insertSingleStudent(Map<String, Object> row) {
+        String studentNo = (String) row.get("studentNo");
+        String name = (String) row.get("name");
+        String username = (String) row.get("username");
+        String classname = (String) row.get("classname");
+        String grade = (String) row.get("grade");
+        String gender = (String) row.get("gender");
+        String email = (String) row.get("email");
+        String phone = (String) row.get("phone");
+        
+        // 1. 检查学号是否已存在
+        if (studentRepository.existsByStudentNo(studentNo)) {
+            throw new RuntimeException("学号 " + studentNo + " 已存在");
         }
         
-        return errors;
-    }
-    
-    /**
-     * 处理默认值
-     */
-    public void applyDefaultValues(List<Map<String, Object>> dataList, List<FieldMapping> mappings) {
-        for (Map<String, Object> row : dataList) {
-            for (FieldMapping mapping : mappings) {
-                if (mapping.getDefaultValue() != null) {
-                    Object value = row.get(mapping.getTargetField());
-                    if (value == null || value.toString().trim().isEmpty()) {
-                        row.put(mapping.getTargetField(), mapping.getDefaultValue());
-                    }
-                }
-            }
+        // 2. 检查用户名是否已存在
+        if (userRepository.existsByUsername(username)) {
+            throw new RuntimeException("用户名 " + username + " 已存在");
         }
-    }
-    
-    /**
-     * 自动填充用户名（如果未提供，使用学号）
-     */
-    public void autoFillUsername(List<Map<String, Object>> dataList) {
-        for (Map<String, Object> row : dataList) {
-            String username = (String) row.get("username");
-            String studentNo = (String) row.get("studentNo");
-            
-            if ((username == null || username.isEmpty()) && studentNo != null) {
-                row.put("username", studentNo);
-            }
-        }
+        
+        // 3. 根据班级名称查找班级ID
+        ClassInfo classInfo = classRepository.findByName(classname)
+            .orElseThrow(() -> new RuntimeException("班级 " + classname + " 不存在"));
+        
+        // 4. 创建 User 对象（登录账号）
+        User user = User.builder()
+            .username(username)
+            .password(passwordEncoder.encode("123456"))  // 默认密码 123456
+            .name(name)
+            .email(email != null ? email : "")
+            .gender(gender)
+            .phone(phone != null ? phone : "")
+            .status(UserStatus.ACTIVE)
+            .role(Role.STUDENT)  // 学生角色
+            .build();
+        user = userRepository.save(user);
+        
+        // 5. 创建 Student 对象
+        Student student = Student.builder()
+            .studentNo(studentNo)
+            .user(user)  // 关联 User ID
+            .classInfo(classInfo)
+            .grade(grade != null ? grade : "大一")
+            .build();
+        student = studentRepository.save(student);
+        
+        log.info("学生插入成功 - 学号：{}，姓名：{}，用户名：{}，班级：{}", 
+            studentNo, name, username, classname);
     }
 
      public List<FieldMapping> getStudentFieldMappings() {

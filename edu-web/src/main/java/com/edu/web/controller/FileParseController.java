@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.*;
 public class FileParseController {
     private final DeepSeekService deepSeekService;
     private final FileProcessService fileProcessService;
-      private final StudentImportValidator  studentImportvalidator;
+    private final StudentImportValidator  studentImportvalidator;
   /**
      * 上传并解析文件
      */
@@ -43,17 +43,8 @@ public class FileParseController {
      * 确认并插入数据
      */
     @PostMapping("/confirm")
-    public ResponseEntity<Void> confirmInsert(@RequestBody ConfirmInsertRequest request) {
-        fileProcessService.confirmAndInsert(request);
-        return ResponseEntity.ok().build();
-    }
-    
-    /**
-     * 取消插入（删除临时数据）
-     */
-    @DeleteMapping("/cancel/{sessionId}")
-    public ResponseEntity<Void> cancelInsert(@PathVariable String sessionId) {
-        // 清理缓存即可
-        return ResponseEntity.ok().build();
+    public Result<String> confirmInsert(@RequestBody ConfirmInsertRequest request) {
+        String message=fileProcessService.confirmAndInsert(request);
+        return Result.success(message);
     }
 }

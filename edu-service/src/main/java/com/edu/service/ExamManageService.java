@@ -1078,7 +1078,7 @@ public ExamStudentGradePageVO getStudentGradesPage(ExamStudentGradePageRequest r
         .collect(Collectors.toList());
     
     // 获取统计信息
-    ExamStudentGradePageVO.Statistics statistics = getGradeStatistics(examId);
+    ExamStudentGradePageVO.Statistics statistics = getGradeStatistics(exam);
     
     return ExamStudentGradePageVO.builder()
         .records(records)
@@ -1138,8 +1138,7 @@ private ExamStudentGradeVO convertToExamStudentGradeVO(ExamGrade grade) {
 /**
  * 获取成绩统计信息
  */
-private ExamStudentGradePageVO.Statistics getGradeStatistics(Long examId) {
-    Exam exam = examRepository.findById(examId).orElse(null);
+private ExamStudentGradePageVO.Statistics getGradeStatistics(Exam exam) {
     if (exam == null) {
         return ExamStudentGradePageVO.Statistics.builder()
             .totalStudents(0).avgScore(0.0).highestScore(0.0).lowestScore(0.0)
@@ -1147,33 +1146,38 @@ private ExamStudentGradePageVO.Statistics getGradeStatistics(Long examId) {
             .build();
     }
     
-    Object[] stats = examGradeRepository.getScoreStatistics(examId);
-    
+    Object[] stats = examGradeRepository.getScoreStatistics(exam.getId());
+
     if (stats == null || stats.length < 4) {
         return ExamStudentGradePageVO.Statistics.builder()
             .totalStudents(0).avgScore(0.0).highestScore(0.0).lowestScore(0.0)
             .passRate(0.0).excellentRate(0.0).passCount(0).excellentCount(0).failCount(0)
             .build();
     }
+
+    
     
     // 安全转换
     double avg = 0.0;
     double highest = 0.0;
     double lowest = 0.0;
-    long total = 0L;
+    Integer total = 0;
     
     try {
         if (stats[0] != null) avg = ((Number) stats[0]).doubleValue();
         if (stats[1] != null) highest = ((Number) stats[1]).doubleValue();
         if (stats[2] != null) lowest = ((Number) stats[2]).doubleValue();
-        if (stats[3] != null) total = ((Number) stats[3]).longValue();
+        if (stats[3] != null) total = (Integer)stats[3];
     } catch (Exception e) {
         log.error("解析统计结果失败: {}", e.getMessage());
     }
     
+
+    log.info("获取成绩统计信息: {}", avg,total);
+    
     // 统计各分数段人数
-    long passCount = examGradeRepository.countByExamIdAndScoreGreaterThanEqual(examId, (double) exam.getPassScore());
-    long excellentCount = examGradeRepository.countByExamIdAndScoreGreaterThanEqual(examId, 80.0);
+    long passCount = examGradeRepository.countByExamIdAndScoreGreaterThanEqual(exam.getId(), (double) exam.getPassScore());
+    long excellentCount = examGradeRepository.countByExamIdAndScoreGreaterThanEqual(exam.getId(), 80.0);
     long failCount = total - passCount;
     
     return ExamStudentGradePageVO.Statistics.builder()

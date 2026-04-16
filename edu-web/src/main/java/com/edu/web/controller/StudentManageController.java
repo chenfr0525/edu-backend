@@ -20,17 +20,11 @@ import com.edu.common.PageResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/student-manage")
@@ -51,22 +45,8 @@ public class StudentManageController {
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public Result<PageResult<Student>> getStudentList(@RequestBody StudentListRequest request) {
         User currentUser = authService.getUser();
-        
-        //  Pageable pageable = PageRequest.of(request.getPage(), request.getSize());
         Page<Student> studentPage = studentManageService.getStudentList(
             request, currentUser.getId(), currentUser.getRole().name());
-        
-        // 转换为VO
-        // List<StudentInfoVO> voList = studentPage.getContent().stream()
-        //     .map(this::convertToVO)
-        //     .collect(Collectors.toList());
-        
-        // PageResult<StudentInfoVO> pageResult = PageResult.<StudentInfoVO>builder()
-        //     .list(voList)  // 改为 list，不是 records
-        //     .total(studentPage.getTotalElements())
-        //     .page(request.getPage() != null ? request.getPage() : 0)  // 改为 page，不是 current
-        //     .pageSize(request.getSize() != null ? request.getSize() : 10)  // 改为 pageSize，不是 size
-        //     .build();
         
         return Result.success(PageResult.of(studentPage));
     }
@@ -86,63 +66,6 @@ public class StudentManageController {
             currentUser.getId(), currentUser.getRole().name(), classId, courseId);
         
         return Result.success(stats);
-    }
-
-      /**
-     * 上传并预览学生导入文件
-     * POST /api/student-manage/import/preview
-     */
-    @PostMapping("/import/preview")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<FileImportPreviewVO> previewImport(@RequestParam("file") MultipartFile file) {
-        try {
-            FileImportPreviewVO preview = studentManageService.parseImportFile(file);
-            return Result.success(preview);
-        } catch (Exception e) {
-            log.error("文件解析失败", e);
-            return Result.error("文件解析失败: " + e.getMessage());
-        }
-    }
-
-      /**
-     * 获取文件预览数据
-     * GET /api/student-manage/import/preview/{fileId}
-     */
-    @GetMapping("/import/preview/{fileId}")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<FileImportPreviewVO> getPreview(@PathVariable String fileId) {
-        FileImportPreviewVO preview = studentManageService.getFilePreview(fileId);
-        if (preview == null) {
-            return Result.error("预览数据已过期，请重新上传");
-        }
-        return Result.success(preview);
-    }
-
-     /**
-     * 确认导入学生数据
-     * POST /api/student-manage/import/confirm
-     */
-    @PostMapping("/import/confirm")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<StudentImportResultVO> confirmImport(@RequestBody StudentImportConfirmRequest request) {
-        try {
-            StudentImportResultVO result = studentManageService.confirmImport(request);
-            return Result.success(result);
-        } catch (Exception e) {
-            log.error("导入失败", e);
-            return Result.error("导入失败: " + e.getMessage());
-        }
-    }
-
-     /**
-     * 取消导入（删除临时文件）
-     * DELETE /api/student-manage/import/cancel/{fileId}
-     */
-    @DeleteMapping("/import/cancel/{fileId}")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<Void> cancelImport(@PathVariable String fileId) {
-        studentManageService.cancelImport(fileId);
-        return Result.success(null);
     }
 
      /**
