@@ -50,11 +50,8 @@ public class TeacherDashboardController {
     private final ActivityRecordService activityRecordService;
     private final ActivityAlertService alertService;
     private final AiAnalysisReportService aiReportService;
-    private final HomeworkService homeworkService;
     private final SubmissionService submissionService;
-    private final CourseService courseService;
      private final TeachingDashboardService dashboardService;
-    private final AiReportGenerationService aiReportGenerationService;
     private final AuthService authService;
      private final ClassRepository classRepository;
      private final CourseRepository courseRepository;
@@ -101,11 +98,13 @@ public class TeacherDashboardController {
             scoreDistribution.put("不及格(<60)", 0);
             
             double totalScore = 0;
+            int scoreCount = 0;
             List<Double> allScores = new ArrayList<>();
             for (ExamGrade grade : grades) {
                 double score = grade.getScore().doubleValue();
                 allScores.add(score);
                 totalScore += score;
+                scoreCount++;
                 if (score >= 90) scoreDistribution.put("优秀(>=90)", scoreDistribution.get("优秀(>=90)") + 1);
                 else if (score >= 80) scoreDistribution.put("良好(80-89)", scoreDistribution.get("良好(80-89)") + 1);
                 else if (score >= 70) scoreDistribution.put("中等(70-79)", scoreDistribution.get("中等(70-79)") + 1);
@@ -114,7 +113,7 @@ public class TeacherDashboardController {
             }
             
             // 计算标准差（反映成绩离散程度）
-            double avg = totalScore / grades.size();
+            double avg = totalScore /scoreCount;
             double variance = allScores.stream()
                 .mapToDouble(s -> Math.pow(s - avg, 2))
                 .average()
@@ -130,7 +129,7 @@ public class TeacherDashboardController {
 
         
             dashboard.put("scoreDistribution", scoreDistribution);
-            dashboard.put("classAverageScore", grades.isEmpty() ? 0 : totalScore / grades.size());
+            dashboard.put("classAverageScore", scoreCount==0 ? 0 :avg);
             dashboard.put("highestScore", allScores.stream().max(Double::compare).orElse(0.0));
             dashboard.put("lowestScore", allScores.stream().min(Double::compare).orElse(0.0));
             dashboard.put("standardDeviation", Math.round(stdDev * 100) / 100.0);

@@ -21,6 +21,7 @@ import com.edu.domain.ExamStatus;
 import com.edu.domain.Homework;
 import com.edu.domain.Semester;
 import com.edu.domain.Submission;
+import com.edu.domain.SubmissionStatus;
 import com.edu.domain.dto.HomeworkAiAnalysisDTO;
 import com.edu.domain.dto.HomeworkAnalysisDTO;
 import com.edu.domain.dto.HomeworkDetailDTO;
@@ -73,7 +74,7 @@ public class HomeworkAnalysisService {
         }
         
         Pageable pageable = PageRequest.of(page, size);
-        Page<Homework> homeworkPage = homeworkRepository.findWithFilters(courseIds, status, keyword, pageable);
+        Page<Homework> homeworkPage = homeworkRepository.findWithFilters(courseIds, keyword, pageable);
         
         return homeworkPage.map(this::convertToDTO);
     }
@@ -103,7 +104,7 @@ public class HomeworkAnalysisService {
         
         // 统计提交情况
         int totalStudents = getTotalStudentsByCourseId(homework.getCourse().getId());
-        int submittedCount = (int) submissionRepository.countByHomeworkIdAndStatusNot(homeworkId, "PENDING");
+        int submittedCount = (int) submissionRepository.countByHomeworkIdAndStatusNot(homeworkId, SubmissionStatus.PENDING);
         int onTimeCount = (int) submissionRepository.countOnTimeByHomeworkId(homeworkId);
         
         detail.setTotalStudents(totalStudents);
@@ -427,7 +428,7 @@ public class HomeworkAnalysisService {
     
     private BigDecimal calculateOverallOnTimeRate(List<Long> courseIds) {
         // 计算所有作业的平均按时提交率
-        List<Homework> homeworks = homeworkRepository.findWithFilters(courseIds, null, null, Pageable.unpaged()).getContent();
+        List<Homework> homeworks = homeworkRepository.findWithFilters(courseIds, null, Pageable.unpaged()).getContent();
         if (homeworks.isEmpty()) {
             return BigDecimal.ZERO;
         }

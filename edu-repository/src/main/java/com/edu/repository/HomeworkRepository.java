@@ -40,9 +40,6 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
     Page<Homework> findByCourse(Course course, Pageable pageable);
 
     
-    // 根据状态查询
-    List<Homework> findByStatus(String status);
-    
     // 查询未截止的作业
     List<Homework> findByDeadlineAfterAndStatus(LocalDateTime now, String status);
 
@@ -57,10 +54,8 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
     
     // 带筛选条件的查询
     @Query("SELECT h FROM Homework h WHERE h.course.id IN :courseIds " +
-           "AND (:status IS NULL OR h.status = :status) " +
            "AND (:keyword IS NULL OR h.name LIKE %:keyword%)")
     Page<Homework> findWithFilters(@Param("courseIds") List<Long> courseIds,
-                                    @Param("status") String status,
                                     @Param("keyword") String keyword,
                                     Pageable pageable);
     
@@ -82,7 +77,7 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
      /**
      * 获取某课程的所有作业（按截止时间倒序）
      */
-    @Query("SELECT h FROM Homework h WHERE h.course.id = :courseId AND h.status != 'PENDING' ORDER BY h.deadline DESC")
+    @Query("SELECT h FROM Homework h WHERE h.course.id = :courseId AND h.status != com.edu.domain.HomeworkStatus.PENDING ORDER BY h.deadline DESC")
     List<Homework> findByCourseIdOrderByDeadlineDesc(@Param("courseId") Long courseId);
     
     /**
@@ -96,6 +91,16 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
            "ORDER BY h.deadline DESC")
     List<Homework> findByStudentIdAndSemesterId(@Param("studentId") Long studentId, 
                                                  @Param("semesterId") Long semesterId);
+
+    /**
+     * 获取学生的所有作业（通过选课关联）
+     */
+    @Query("SELECT DISTINCT h FROM Homework h " +
+           "JOIN h.course c " +
+           "JOIN Enrollment e ON e.course = c " +
+           "WHERE e.student.id = :studentId " +
+           "ORDER BY h.deadline DESC")
+    List<Homework> findByStudentId(@Param("studentId") Long studentId);
     
     /**
      * 获取学生某课程的所有作业

@@ -1,9 +1,6 @@
 package com.edu.web.controller;
 
 import com.edu.common.Result;
-import com.edu.domain.AiAnalysisReport;
-import com.edu.domain.Homework;
-import com.edu.domain.Student;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.HomeworkStatisticsCards;
 import com.edu.domain.dto.HomeworkTrendData;

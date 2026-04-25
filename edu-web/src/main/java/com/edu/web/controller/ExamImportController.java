@@ -1,16 +1,20 @@
 package com.edu.web.controller;
 
 import com.edu.common.Result;
+import com.edu.domain.User;
 import com.edu.domain.dto.ConfirmInsertRequest;
 import com.edu.domain.dto.FileParseRequest;
 import com.edu.domain.dto.ParseResult;
 import com.edu.domain.dto.ExamGradeImportResult;
+import com.edu.service.AuthService;
 import com.edu.service.DeepSeekService;
 import com.edu.service.ExamImportValidator;
 import com.edu.service.ExamGradeImportValidator;
 import com.edu.service.FileProcessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -23,6 +27,7 @@ public class ExamImportController {
     private final FileProcessService fileProcessService;
     private final ExamImportValidator examImportValidator;
     private final ExamGradeImportValidator examGradeImportValidator;
+    private final AuthService authService;
 
     /**
      * 上传并解析考试文件
@@ -48,8 +53,10 @@ public class ExamImportController {
      * 确认并导入考试数据
      */
     @PostMapping("/confirm")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public Result<String> confirmExamInsert(@RequestBody ConfirmInsertRequest request) {
-        String message = fileProcessService.confirmAndInsert(request);
+        User currentUser = authService.getUser();
+        String message = fileProcessService.confirmAndInsert(request,currentUser);
         return Result.success(message);
     }
 
@@ -79,7 +86,7 @@ public class ExamImportController {
      * @param request 确认请求
      */
     @PostMapping("/grade/confirm/{examId}")
-    public Result<ExamGradeImportResult> confirmExamGradeInsert(
+    public Result<String> confirmExamGradeInsert(
             @PathVariable Long examId,
             @RequestBody ConfirmInsertRequest request) {
         
@@ -88,6 +95,6 @@ public class ExamImportController {
             request.getData()
         );
         
-        return result.isSuccess() ? Result.success(result) : Result.error(result.getMessage());
+        return result.isSuccess() ? Result.success("数据导入成功") : Result.error(result.getMessage());
     }
 }

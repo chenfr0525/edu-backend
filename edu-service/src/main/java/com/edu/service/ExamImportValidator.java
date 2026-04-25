@@ -20,12 +20,14 @@ import com.edu.domain.ClassInfo;
 import com.edu.domain.Course;
 import com.edu.domain.Exam;
 import com.edu.domain.ExamStatus;
+import com.edu.domain.User;
 import com.edu.domain.dto.FieldMapping;
 import com.edu.domain.dto.ValidationError;
 import com.edu.repository.ClassRepository;
 import com.edu.repository.CourseRepository;
 import com.edu.repository.EnrollmentRepository;
 import com.edu.repository.ExamRepository;
+import com.edu.repository.TeacherRepository;
 
 @Service
 @RequiredArgsConstructor
@@ -36,15 +38,15 @@ public class ExamImportValidator {
     private final ExamRepository examRepository;
     private final ClassRepository classRepository;
     private final CourseRepository courseRepository;
-    private final EnrollmentRepository enrollmentRepository;
+    private final TeacherRepository teacherRepository;
 
     /**
      * 确认导入考试数据
      */
     @Transactional
-    public String insertExamData(List<Map<String, Object>> data) {
+    public String insertExamData(List<Map<String, Object>> data,User user) {
         List<FieldMapping> mappings = getExamFieldMappings();
-
+        Long teacherId=teacherRepository.findByUser(user).get().getId();
         List<ValidationError> errors = deepSeekService.validateData(data, mappings);
         if (!errors.isEmpty()) {
             log.error("数据验证失败：{}", errors);
@@ -62,7 +64,7 @@ public class ExamImportValidator {
 
         for (Map<String, Object> row : data) {
             try {
-                insertSingleExam(row);
+                insertSingleExam(row,teacherId);
                 successCount++;
                 log.info("成功导入考试：{}", row.get("name"));
             } catch (Exception e) {
@@ -85,7 +87,7 @@ public class ExamImportValidator {
     /**
      * 插入单条考试数据
      */
-    private void insertSingleExam(Map<String, Object> row) {
+    private void insertSingleExam(Map<String, Object> row,Long teacherId) {
         String name = (String) row.get("name");
         String type = (String) row.get("type");
         String classname = (String) row.get("classname");
@@ -100,9 +102,12 @@ public class ExamImportValidator {
         String description = (String) row.get("description");
 
         // 1. 检查考试名称是否已存在（同一课程下）
-        Course course = courseRepository.findByName(coursename)
-            .orElseThrow(() -> new RuntimeException("课程 " + coursename + " 不存在"));
-
+         List<Course> courses = courseRepository.findByNameAndTeacherId( teacherId,coursename);
+        if (courses == null || courses.isEmpty()) {
+            log.warn("未找到课程: {}", coursename);
+            throw new RuntimeException("课程 " + coursename + " 不存在");
+        }
+        Course course = courses.get(0);
         ClassInfo classInfo = null;
         if (classname != null && !classname.isEmpty()) {
             classInfo = classRepository.findByName(classname)

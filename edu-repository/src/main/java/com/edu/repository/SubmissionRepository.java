@@ -1,6 +1,7 @@
 package com.edu.repository;
 
 import com.edu.domain.Submission;
+import com.edu.domain.SubmissionStatus;
 import com.edu.domain.Student;
 import com.edu.domain.Homework;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -25,8 +26,8 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     Submission findByHomeworkAndStudent(Homework homework, Student student);
 
      // 统计学生作业完成率 - 修正：使用 student.id
-    @Query("SELECT COUNT(s) FROM Submission s WHERE s.student.id = :studentId AND s.status = 'GRADED'")
-    long countCompletedByStudent(@Param("studentId") Long studentId);
+    @Query("SELECT COUNT(s) FROM Submission s WHERE s.student.id = :studentId AND s.status = com.edu.domain.SubmissionStatus.GRADED")
+long countCompletedByStudent(@Param("studentId") Long studentId);
     
     // 统计学生平均作业分 - 修正：使用 student.id
     @Query("SELECT AVG(s.score) FROM Submission s WHERE s.student.id = :studentId AND s.score IS NOT NULL")
@@ -36,27 +37,29 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     long countLateByStudent(@Param("student") Student student);
 
      // 统计作业按时提交率
-    @Query("SELECT COUNT(s) FROM Submission s WHERE s.homework.id = :homeworkId AND s.submissionLateMinutes = 0 AND s.status != 'PENDING'")
-    long countOnTimeByHomeworkId(@Param("homeworkId") Long homeworkId);
+    @Query("SELECT COUNT(s) FROM Submission s WHERE s.homework.id = :homeworkId AND s.submissionLateMinutes = 0 AND s.status != com.edu.domain.SubmissionStatus.PENDING")
+long countOnTimeByHomeworkId(@Param("homeworkId") Long homeworkId);
     
     // 统计已提交人数
-    long countByHomeworkIdAndStatusNot(Long homeworkId, String status);
+    long countByHomeworkIdAndStatusNot(Long homeworkId, SubmissionStatus status);
     
     // 获取作业成绩分布
     @Query("SELECT s.score FROM Submission s WHERE s.homework.id = :homeworkId AND s.score IS NOT NULL")
     List<Integer> findScoresByHomeworkId(@Param("homeworkId") Long homeworkId);
     
-    // 统计每个知识点的错误人数（通过作业的题目知识点映射）
-    @Query(value = "SELECT " +
-           "  JSON_EXTRACT(s.knowledge_point_scores, CONCAT('$.', kp.id)) as kp_score, " +
-           "  COUNT(DISTINCT s.student_id) as error_count " +
-           "FROM submission s " +
-           "CROSS JOIN knowledge_point kp " +
-           "WHERE s.homework_id = :homeworkId " +
-           "  AND s.status = 'GRADED' " +
-           "  AND JSON_EXTRACT(s.knowledge_point_scores, CONCAT('$.', kp.id)) < 6 " +
-           "GROUP BY kp.id", nativeQuery = true)
-    List<Object[]> countKnowledgePointErrors(@Param("homeworkId") Long homeworkId);
+@Query(value = "SELECT " +
+       "  kp.id as knowledge_point_id, " +
+       "  kp.name as knowledge_point_name, " +
+       "  JSON_EXTRACT(s.knowledge_point_scores, CONCAT('$.\"', kp.id, '\"')) as kp_score, " +
+       "  COUNT(DISTINCT s.student_id) as error_count " +
+       "FROM submission s " +
+       "CROSS JOIN knowledge_point kp " +
+       "WHERE s.homework_id = :homeworkId " +
+       "  AND s.status = 'GRADED' " +
+       "  AND CAST(JSON_EXTRACT(s.knowledge_point_scores, CONCAT('$.\"', kp.id, '\"')) AS UNSIGNED) < 6 " +
+       "GROUP BY kp.id, kp.name, JSON_EXTRACT(s.knowledge_point_scores, CONCAT('$.\"', kp.id, '\"'))", 
+       nativeQuery = true)
+List<Object[]> countKnowledgePointErrors(@Param("homeworkId") Long homeworkId);
 
     /**
      * 根据学生ID和作业ID获取提交记录

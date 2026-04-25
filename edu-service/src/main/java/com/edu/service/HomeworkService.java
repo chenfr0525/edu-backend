@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import com.edu.domain.Course;
 import com.edu.domain.Homework;
+import com.edu.domain.HomeworkStatus;
 import com.edu.repository.HomeworkRepository;
 
 @Service
@@ -31,7 +32,7 @@ public class HomeworkService {
         return homeworkRepository.findByCourse(course);
     }
     
-    public List<Homework> findByStatus(String status) {
+    public List<Homework> findByStatus(HomeworkStatus status) {
         return homeworkRepository.findByStatus(status);
     }
     

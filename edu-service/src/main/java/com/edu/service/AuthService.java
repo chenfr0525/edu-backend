@@ -34,6 +34,7 @@ public class AuthService {
     private final TeacherRepository teacherRepository;
     private final MenuRepository menuRepository;
     private final StudentService studentService;
+    private final TeacherService teacherrService;
 
     public Map<String, Object> login(String username, String password,String role) {
         User user = userRepository.findByUsername(username)
@@ -126,10 +127,20 @@ public class AuthService {
        public Map<String, Object> getUserInfo() {
         User user = userRepository.findByUsername(jwtUtils.extractUsername(jwtUtils.getToken()))
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        Student student = studentService.findByUserId(user.getId())
-                .orElse(null);
+                
         Map<String, Object> userInfo = new HashMap<>();
+                if(user.getRole() == Role.STUDENT){
+                     Student student = studentService.findByUserId(user.getId())
+                .orElse(null);
+                
         userInfo.put("user", student);
+                }else{
+                    Teacher teacher = teacherrService.findByUser(user)
+                     .orElse(null);
+        userInfo.put("user", teacher);
+               
+                }
+       
         return userInfo;
        }
 

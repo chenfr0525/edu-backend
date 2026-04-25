@@ -2,6 +2,7 @@
 package com.edu.service;
 
 import com.edu.domain.Student;
+import com.edu.domain.User;
 import com.edu.domain.dto.ConfirmInsertRequest;
 import com.edu.domain.dto.ExamGradeImportResult;
 import com.edu.domain.dto.FileParseRequest;
@@ -23,6 +24,7 @@ public class FileProcessService {
     private final StudentImportValidator studentImportValidator;
     private final ExamImportValidator examImportValidator;
     private final ExamGradeImportValidator examGradeImportValidator;
+    private final HomeworkManageService homeworkManageService;
     
     /**
      * 步骤1：解析文件并暂存数据
@@ -45,7 +47,7 @@ public class FileProcessService {
      * 步骤2：确认并插入数据库
      */
     @Transactional
-    public String confirmAndInsert(ConfirmInsertRequest request) {
+    public String confirmAndInsert(ConfirmInsertRequest request,User user) {
         // 2. 使用确认后的数据（可能被用户修改过）
         List<Map<String, Object>> dataToInsert = request.getData();
         if (dataToInsert == null || dataToInsert.isEmpty()) {
@@ -61,12 +63,10 @@ public class FileProcessService {
                 result = studentImportValidator.insertStudentData(dataToInsert);
                 break;
             case "exam":
-                result = examImportValidator.insertExamData(dataToInsert);
+                result = examImportValidator.insertExamData(dataToInsert,user);
                 break;
-            case "exam_grade":
-                // 考试成绩导入需要 examId，所以可能需要特殊处理
-                // 如果 ConfirmInsertRequest 中没有 examId，需要单独处理
-                result = "考试成绩导入请使用专用接口";
+            case "homework":
+                result = homeworkManageService.confirmHomeworkImport(dataToInsert,user);
                 break;
             default:
                 result = "不支持的导入类型: " + type;

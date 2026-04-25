@@ -1,4 +1,3 @@
-// ExamGradeImportValidator.java
 package com.edu.service;
 
 import lombok.RequiredArgsConstructor;
@@ -529,7 +528,7 @@ private Semester getCurrentSemester() {
     /**
      * 构建错误消息
      */
-    private String buildErrorMessage(List<ValidationError> errors) {
+    public String buildErrorMessage(List<ValidationError> errors) {
         StringBuilder sb = new StringBuilder();
         for (ValidationError error : errors) {
             sb.append(error.getErrorMessage()).append("\n");

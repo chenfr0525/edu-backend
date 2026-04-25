@@ -119,6 +119,8 @@ public class StudentHomeworkAnalysisService {
         long totalHomework = 0;
         if (currentSemester != null) {
             totalHomework = homeworkRepository.findByStudentIdAndSemesterId(studentId, currentSemester.getId()).size();
+        }else{
+            totalHomework = homeworkRepository.findByStudentId(student.getId()).size();
         }
         cards.setTotalCount(totalHomework);
         cards.setCompletedCount((long) gradedSubmissions.size());

@@ -14,7 +14,7 @@ import java.util.Optional;
 public interface CourseRepository extends JpaRepository<Course, Long> {
     Optional<Course> findById(Long id);
     List<Course> findByTeacher(Teacher teacher);
-    Optional<Course> findByName(String name);
+    List<Course> findByName(String name);
 
     List<Course> findAllByStatus(CourseStatus status);
 
@@ -29,4 +29,7 @@ public interface CourseRepository extends JpaRepository<Course, Long> {
 
 @Query("SELECT c FROM Course c WHERE c.id IN (SELECT e.course.id FROM Enrollment e WHERE e.student.id = :studentId)")
 List<Course> findByStudentId(@Param("studentId") Long studentId);
+
+@Query("SELECT c FROM Course c WHERE c.teacher.id = :teacherId AND c.name = :name")
+List<Course> findByNameAndTeacherId(@Param("teacherId") Long teacherId, @Param("name") String name);
 }

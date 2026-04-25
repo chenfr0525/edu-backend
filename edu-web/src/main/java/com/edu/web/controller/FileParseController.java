@@ -1,10 +1,12 @@
 package com.edu.web.controller;
 
 import com.edu.common.Result;
+import com.edu.domain.User;
 import com.edu.domain.dto.ConfirmInsertRequest;
 import com.edu.domain.dto.FileParseRequest;
 import com.edu.domain.dto.ParseResult;
 import com.edu.domain.dto.ValidationError;
+import com.edu.service.AuthService;
 import com.edu.service.DeepSeekService;
 import com.edu.service.FileProcessService;
 import com.edu.service.StudentImportValidator;
@@ -12,6 +14,7 @@ import com.edu.service.StudentImportValidator;
 import lombok.RequiredArgsConstructor;
 import java.util.Arrays;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -21,6 +24,7 @@ public class FileParseController {
     private final DeepSeekService deepSeekService;
     private final FileProcessService fileProcessService;
     private final StudentImportValidator  studentImportvalidator;
+    private final AuthService authService;
   /**
      * 上传并解析文件
      */
@@ -43,8 +47,10 @@ public class FileParseController {
      * 确认并插入数据
      */
     @PostMapping("/confirm")
+     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public Result<String> confirmInsert(@RequestBody ConfirmInsertRequest request) {
-        String message=fileProcessService.confirmAndInsert(request);
+         User currentUser = authService.getUser();
+        String message=fileProcessService.confirmAndInsert(request,currentUser);
         return Result.success(message);
     }
 }
