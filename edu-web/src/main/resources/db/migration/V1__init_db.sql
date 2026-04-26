@@ -128,7 +128,6 @@ CREATE TABLE homework (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
     KEY `idx_course_id` (`course_id`),
-    KEY `idx_knowledge_point_id` (`knowledge_point_id`),
     FOREIGN KEY (course_id) REFERENCES course(`id`)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='作业表';
 
