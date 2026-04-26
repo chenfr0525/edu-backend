@@ -49,6 +49,7 @@ public class AuthController {
     @Operation(summary = "获取用户信息")
     @PreAuthorize("isAuthenticated()")
     public Result<Map<String, Object>> getUserInfo() {
+        authService.updateLastLoginTime();
         Map<String, Object> userInfo = authService.getUserInfo();
         return Result.success(userInfo);
     }

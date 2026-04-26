@@ -54,7 +54,7 @@ List<ActivityRecord> findByClassIdAndDateBetween(
  * 查询某学生在指定日期之后的活动记录
  */
 @Query("SELECT a FROM ActivityRecord a WHERE a.student.id = :studentId AND a.activityDate >= :startDate")
-List<ActivityRecord> findByStudentIdAndActivityDateAfter(@Param("studentId") Long studentId, @Param("startDate") LocalDate startDate);
+List<ActivityRecord> findByStudentIdAndActivityDateAfter(@Param("studentId") Long studentId, @Param("startDate") LocalDateTime startDate);
 
 /**
  * 统计某学生在指定日期之后的活跃记录数

@@ -170,6 +170,14 @@ public class ExamManageService {
         double avg = grades.stream().mapToDouble(g -> g.getScore().doubleValue()).average().orElse(0);
         long passCount = grades.stream().filter(g -> g.getScore().doubleValue() >= exam.getPassScore()).count();
         
+         boolean hasAiAnalysis = false;
+    AiAnalysisReport report = aiReportRepository
+        .findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
+            "EXAM", exam.getId(), "EXAM_ANALYSIS");
+    if (report != null) {
+        hasAiAnalysis = true;
+    }
+
         return ExamInfoVO.builder()
             .id(exam.getId())
             .name(exam.getName())
@@ -188,7 +196,7 @@ public class ExamManageService {
                 BigDecimal.valueOf(passCount * 100.0 / studentCount).setScale(2, RoundingMode.HALF_UP))
             .highestScore(exam.getHighestScore())
             .createdAt(exam.getCreatedAt())
-            .hasAiAnalysis(exam.getAiParsedData() != null)
+            .hasAiAnalysis(hasAiAnalysis)
             .courseId(exam.getClassInfo().getId())
             .classId(exam.getClassInfo().getId())
             .description(exam.getDescription())
@@ -359,57 +367,93 @@ public class ExamManageService {
 
     // ==================== 考试详情 ====================
 
-    @Transactional(readOnly = true)
-    public ExamDetailVO getExamDetail(Long examId) {
-        Exam exam = examRepository.findById(examId)
-            .orElseThrow(() -> new RuntimeException("考试不存在"));
-        
-        List<ExamGrade> grades = examGradeRepository.findStudentGradesByExamId(examId);
-        int totalStudents = getTotalStudentsByClassId(exam.getClassInfo().getId());
-          if (exam.getClassInfo() == null) {
+   @Transactional(readOnly = true)
+public ExamDetailVO getExamDetail(Long examId) {
+    Exam exam = examRepository.findById(examId)
+        .orElseThrow(() -> new RuntimeException("考试不存在"));
+    
+    List<ExamGrade> grades = examGradeRepository.findStudentGradesByExamId(examId);
+    int totalStudents = getTotalStudentsByClassId(exam.getClassInfo().getId());
+    
+    if (exam.getClassInfo() == null) {
         log.error("考试 {} 未关联班级", examId);
         throw new RuntimeException("考试未关联班级，请先为考试关联班级");
     }
         
-        ExamDetailStatsVO stats = buildExamStats(exam, grades, totalStudents);
-        ScoreDistributionDTO distribution = new ScoreDistributionDTO();
+     ExamDetailStatsVO stats = buildExamStats(exam, grades, totalStudents);
+    ScoreDistributionDTO distribution = buildScoreDistribution(grades);
+    List<ExamStudentGradeVO> studentGrades = buildStudentGrades(grades);
+    List<ExamKnowledgePointDTO> knowledgePointAnalysis = buildKnowledgePointAnalysis(exam);
+    
+    // 修改：从 ai_analysis_report 表获取 AI 分析
+    ExamAiAnalysisVO aiAnalysis = parseAiAnalysis(exam);
+    
+    // 知识点分布已废弃，返回空Map
+    Map<String, Object> kpDistribution = new HashMap<>();
+    kpDistribution.put("knowledgePoints", new ArrayList<>());
+    kpDistribution.put("totalScore", exam.getFullScore());
 
-         distribution.setExcellentCount(0);
-        distribution.setGoodCount(0);
-        distribution.setMediumCount(0);
-        distribution.setPassCount(0);
-        distribution.setFailCount(0);
-          if (!grades.isEmpty()) {
-                   for (ExamGrade grade : grades) {
-            int score = grade.getScore() != null ? grade.getScore().intValue() : 0;
-            if (score >= 90) distribution.setExcellentCount(distribution.getExcellentCount() + 1);
-            else if (score  >= 80) distribution.setGoodCount(distribution.getGoodCount() + 1);
-            else if (score  >= 70) distribution.setMediumCount(distribution.getMediumCount() + 1);
-            else if (score  >= 60) distribution.setPassCount(distribution.getPassCount() + 1);
-            else distribution.setFailCount(distribution.getFailCount() + 1);
-        }
-        }
-        List<ExamStudentGradeVO> studentGrades = buildStudentGrades(grades);
-        List<ExamKnowledgePointDTO> knowledgePointAnalysis = buildKnowledgePointAnalysis(exam);
-        ExamAiAnalysisVO aiAnalysis = parseAiAnalysis(exam);
-        Map<String, Object> kpDistribution = parseKnowledgePointsDistribution(exam);
-        
-        return ExamDetailVO.builder()
-            .id(exam.getId()).name(exam.getName()).type(exam.getType())
-            .typeText(getExamTypeText(exam.getType()))
-            .className(exam.getClassInfo().getName())
-            .courseName(exam.getCourse().getName()).courseId(exam.getCourse().getId())
-            .examDate(exam.getExamDate()).startTime(exam.getStartTime()).endTime(exam.getEndTime())
-            .duration(exam.getDuration()).fullScore(exam.getFullScore()).passScore(exam.getPassScore())
-            .location(exam.getLocation()).status(exam.getStatus().toString()).description(exam.getDescription())
-            .createdAt(exam.getCreatedAt())
-            .classAvgScore(exam.getClassAvgScore()).highestScore(exam.getHighestScore()).lowestScore(exam.getLowestScore())
-            .stats(stats).scoreDistribution(distribution)
-            .studentGrades(studentGrades).knowledgePointAnalysis(knowledgePointAnalysis)
-            .aiAnalysis(aiAnalysis).knowledgePointsDistribution(kpDistribution)
-            .build();
+       return ExamDetailVO.builder()
+        .id(exam.getId()).name(exam.getName()).type(exam.getType())
+        .typeText(getExamTypeText(exam.getType()))
+        .className(exam.getClassInfo().getName())
+        .courseName(exam.getCourse().getName()).courseId(exam.getCourse().getId())
+        .examDate(exam.getExamDate()).startTime(exam.getStartTime()).endTime(exam.getEndTime())
+        .duration(exam.getDuration()).fullScore(exam.getFullScore()).passScore(exam.getPassScore())
+        .location(exam.getLocation()).status(exam.getStatus().toString()).description(exam.getDescription())
+        .createdAt(exam.getCreatedAt())
+        .classAvgScore(exam.getClassAvgScore()).highestScore(exam.getHighestScore()).lowestScore(exam.getLowestScore())
+        .stats(stats).scoreDistribution(distribution)
+        .studentGrades(studentGrades).knowledgePointAnalysis(knowledgePointAnalysis)
+        .aiAnalysis(aiAnalysis).knowledgePointsDistribution(kpDistribution)
+        .build();
+}
+
+/**
+ * 构建成绩分布
+ */
+private ScoreDistributionDTO buildScoreDistribution(List<ExamGrade> grades) {
+    ScoreDistributionDTO distribution = new ScoreDistributionDTO();
+    distribution.setExcellentCount(0);
+    distribution.setGoodCount(0);
+    distribution.setMediumCount(0);
+    distribution.setPassCount(0);
+    distribution.setFailCount(0);
+    
+    if (grades == null || grades.isEmpty()) {
+        distribution.setAverageScore(BigDecimal.ZERO);
+        distribution.setHighestScore(BigDecimal.ZERO);
+        distribution.setLowestScore(BigDecimal.ZERO);
+        return distribution;
     }
-
+    
+    for (ExamGrade grade : grades) {
+        int score = grade.getScore() != null ? grade.getScore() : 0;
+        if (score >= 90) distribution.setExcellentCount(distribution.getExcellentCount() + 1);
+ else if (score >= 80) distribution.setGoodCount(distribution.getGoodCount() + 1);
+        else if (score >= 70) distribution.setMediumCount(distribution.getMediumCount() + 1);
+        else if (score >= 60) distribution.setPassCount(distribution.getPassCount() + 1);
+        else distribution.setFailCount(distribution.getFailCount() + 1);
+    }
+    
+    double avg = grades.stream()
+        .mapToInt(g -> g.getScore() != null ? g.getScore() : 0)
+        .average()
+        .orElse(0);
+    int max = grades.stream()
+        .mapToInt(g -> g.getScore() != null ? g.getScore() : 0)
+        .max()
+        .orElse(0);
+    int min = grades.stream()
+        .mapToInt(g -> g.getScore() != null ? g.getScore() : 0)
+        .min()
+        .orElse(0);
+ distribution.setAverageScore(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP));
+    distribution.setHighestScore(BigDecimal.valueOf(max));
+    distribution.setLowestScore(BigDecimal.valueOf(min));
+    
+    return distribution;
+}
     private ExamDetailStatsVO buildExamStats(Exam exam, List<ExamGrade> grades, int totalStudents) {
         if (grades.isEmpty()) {
             return ExamDetailStatsVO.builder().totalStudents(totalStudents).submittedCount(0)
@@ -462,57 +506,70 @@ public class ExamManageService {
         return result;
     }
 
-    private List<ExamKnowledgePointDTO> buildKnowledgePointAnalysis(Exam exam) {
-        List<ExamKnowledgePointDTO> result = new ArrayList<>();
-        
-        Map<String, Object> kpDistribution = parseKnowledgePointsDistribution(exam);
-        if (kpDistribution == null || !kpDistribution.containsKey("knowledgePoints")) return result;
-        
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> kpList = (List<Map<String, Object>>) kpDistribution.get("knowledgePoints");
-        
-        for (Map<String, Object> kpMap : kpList) {
-            Long kpId = ((Number) kpMap.get("id")).longValue();
-            String kpName = (String) kpMap.get("name");
-            BigDecimal fullScore = kpMap.get("fullScore") != null ? 
-                BigDecimal.valueOf(((Number) kpMap.get("fullScore")).doubleValue()) : BigDecimal.ZERO;
-            
-            // 计算班级平均得分（从knowledge_point_score_detail表获取）
-            BigDecimal classAvgScore = getKnowledgePointClassAvgScore(exam.getId(), kpId);
-            BigDecimal classAvgRate = fullScore.compareTo(BigDecimal.ZERO) > 0 ?
-                classAvgScore.multiply(BigDecimal.valueOf(100)).divide(fullScore, 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-            
-            String level = classAvgRate.doubleValue() >= 70 ? "GOOD" : 
-                           (classAvgRate.doubleValue() >= 50 ? "MODERATE" : "WEAK");
-            
-            result.add(ExamKnowledgePointDTO.builder()
-                .knowledgePointId(kpId).knowledgePointName(kpName)
-                .fullScore(fullScore.intValue())
-                .classAvgRate(classAvgRate).level(level)
-                .suggestion(generateKpSuggestion(level, classAvgRate))
-                .build());
-        }
-        
-        result.sort((a, b) -> a.getClassAvgRate().compareTo(b.getClassAvgRate()));
+   /**
+ * 构建知识点分析（修改为从 knowledge_point_score_detail 表实时计算）
+ */
+private List<ExamKnowledgePointDTO> buildKnowledgePointAnalysis(Exam exam) {
+    List<ExamKnowledgePointDTO> result = new ArrayList<>();
+    
+    // 从考试关联的知识点ID列表获取
+    List<Long> knowledgePointIds = exam.getKnowledgePointIds();
+    if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
+        log.warn("考试 {} 未关联知识点", exam.getId());
         return result;
     }
-
-    private BigDecimal getKnowledgePointClassAvgScore(Long examId, Long knowledgePointId) {
-        @SuppressWarnings("unchecked")
-        List<KnowledgePointScoreDetail> results = kpScoreDetailRepository.findBySourceTypeAndSourceIdAndKnowledgePointId(
-            "EXAM", examId, knowledgePointId);
-       if (results == null || results.isEmpty()) {
+    
+    // 获取知识点信息
+    List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
+    for (KnowledgePoint kp : kps) {
+        // 从 knowledge_point_score_detail 表获取班级平均得分率
+        BigDecimal classAvgRate = getKnowledgePointClassAvgScore(exam.getId(), kp.getId());
+        
+        String level;
+        String suggestion;
+        if (classAvgRate.doubleValue() >= 70) {
+            level = "GOOD";
+            suggestion = "🟢 该知识点掌握良好，得分率" + classAvgRate + "%，继续保持";
+        } else if (classAvgRate.doubleValue() >= 50) {
+            level = "MODERATE";
+            suggestion = "🟡 该知识点掌握中等，得分率" + classAvgRate + "%，需加强练习";
+        } else {
+            level = "WEAK";
+            suggestion = "🔴 该知识点班级掌握薄弱，得分率仅" + classAvgRate + "%，建议安排专项复习";
+        }
+        
+        result.add(ExamKnowledgePointDTO.builder()
+            .knowledgePointId(kp.getId())
+            .knowledgePointName(kp.getName())
+            .fullScore(10)  // 满分10分制，可根据需要调整
+            .classAvgRate(classAvgRate)
+            .level(level)
+            .suggestion(suggestion)
+            .build());
+    }
+    
+    result.sort((a, b) -> a.getClassAvgRate().compareTo(b.getClassAvgRate()));
+    return result;
+}
+    /**
+ * 获取知识点在考试中的班级平均得分（从 knowledge_point_score_detail 表）
+ */
+private BigDecimal getKnowledgePointClassAvgScore(Long examId, Long knowledgePointId) {
+    List<KnowledgePointScoreDetail> details = kpScoreDetailRepository
+        .findBySourceTypeAndSourceIdAndKnowledgePointId("EXAM", examId, knowledgePointId);
+    
+    if (details == null || details.isEmpty()) {
         return BigDecimal.ZERO;
     }
-
-          double avg = results.stream()
-        .filter(r -> r != null && r.getActualScore() != null)
-        .mapToDouble(r -> r.getActualScore().doubleValue())
+    
+    double avg = details.stream()
+        .filter(d -> d != null && d.getScoreRate() != null)
+        .mapToDouble(d -> d.getScoreRate().doubleValue())
         .average()
         .orElse(0);
-        return BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP);
-    }
-
+    
+    return BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP);
+}
     private String generateKpSuggestion(String level, BigDecimal rate) {
         if ("WEAK".equals(level)) {
             return "🔴 该知识点班级掌握薄弱，得分率仅" + rate + "%，建议安排专项复习";
@@ -522,33 +579,44 @@ public class ExamManageService {
         return "🟢 该知识点掌握良好，得分率" + rate + "%，继续保持";
     }
 
-    private ExamAiAnalysisVO parseAiAnalysis(Exam exam) {
-        if (exam.getAiParsedData() == null) return null;
-        try {
-            Map<String, Object> aiData = objectMapper.readValue(exam.getAiParsedData(), Map.class);
-            return ExamAiAnalysisVO.builder()
-                .summary((String) aiData.getOrDefault("summary", ""))
-                .strengths((List<String>) aiData.getOrDefault("strengths", new ArrayList<>()))
-                .weaknesses((List<String>) aiData.getOrDefault("weaknesses", new ArrayList<>()))
-                .suggestions((List<String>) aiData.getOrDefault("suggestions", new ArrayList<>()))
-                .analysisData(aiData)
-                .chartsConfig((Map<String, Object>) aiData.getOrDefault("chartsConfig", new HashMap<>()))
-                .build();
-        } catch (Exception e) {
-            log.error("解析AI数据失败", e);
+   /**
+ * 解析AI分析数据（从 ai_analysis_report 表获取）
+ */
+private ExamAiAnalysisVO parseAiAnalysis(Exam exam) {
+    if (exam == null || exam.getId() == null) return null;
+    
+    try {
+        // 从 ai_analysis_report 表获取最新的考试分析报告
+        AiAnalysisReport report = aiReportRepository
+            .findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
+                "EXAM", exam.getId(), "EXAM_ANALYSIS");
+        
+        if (report == null) {
+            log.debug("未找到考试AI分析报告，考试ID: {}", exam.getId());
             return null;
         }
-    }
-
-    private Map<String, Object> parseKnowledgePointsDistribution(Exam exam) {
-        if (exam.getKnowledgePointsDistribution() == null) return null;
-        try {
-            return objectMapper.readValue(exam.getKnowledgePointsDistribution(), Map.class);
-        } catch (Exception e) {
-            log.error("解析知识点分布失败", e);
-            return null;
+        
+        // 解析 analysis_data JSON
+        Map<String, Object> aiData = objectMapper.readValue(report.getAnalysisData(), Map.class);
+         // 解析 suggestions（存储时用 \n 分隔）
+        List<String> suggestions = new ArrayList<>();
+        if (report.getSuggestions() != null) {
+            suggestions = Arrays.asList(report.getSuggestions().split("\n"));
         }
+        
+        return ExamAiAnalysisVO.builder()
+            .summary(report.getSummary() != null ? report.getSummary() : "")
+            .strengths((List<String>) aiData.getOrDefault("strengths", new ArrayList<>()))
+            .weaknesses((List<String>) aiData.getOrDefault("weaknesses", new ArrayList<>()))
+            .suggestions(suggestions)
+            .analysisData(aiData)
+            .createdAt(report.getCreatedAt())
+            .build();
+    } catch (Exception e) {
+        log.error("解析AI数据失败，考试ID: {}", exam.getId(), e);
+        return null;
     }
+}
 
     // ==================== 删除考试 ====================
 
@@ -955,40 +1023,44 @@ if (!scores.isEmpty()) {
     // ==================== AI报告接口 ====================
 
     @Transactional(readOnly = true)
-    public ExamAiAnalysisVO getCourseExamAiReport(Long courseId, Long classId) {
-        // 从ai_analysis_report表获取最新的报告
-        if (courseId != null) {
-            AiAnalysisReport report = aiReportRepository
-                .findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
-                    "COURSE", courseId, "EXAM_ANALYSIS");
-            if (report != null) {
-                return convertToAiAnalysisVO(report);
-            }
+public ExamAiAnalysisVO getCourseExamAiReport(Long courseId, Long classId) {
+    // 从 ai_analysis_report 表获取最新的报告
+    String targetType = classId != null ? "CLASS" : "COURSE";
+    Long targetId = classId != null ? classId : courseId;
+    
+    if (targetId != null) {
+        AiAnalysisReport report = aiReportRepository
+            .findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
+                targetType, targetId, "EXAM_ANALYSIS");
+        if (report != null) {
+            return convertToAiAnalysisVO(report);
         }
-        
-        // 生成模拟数据
-        return generateMockAiAnalysis();
     }
+    
+    // 如果没有报告，生成模拟数据
+    return generateMockAiAnalysis();
+}
 
     private ExamAiAnalysisVO convertToAiAnalysisVO(AiAnalysisReport report) {
-        try {
-            Map<String, Object> data = objectMapper.readValue(report.getAnalysisData(), Map.class);
-            return ExamAiAnalysisVO.builder()
-                .summary(report.getSummary())
-                .strengths((List<String>) data.getOrDefault("strengths", new ArrayList<>()))
-                .weaknesses((List<String>) data.getOrDefault("weaknesses", new ArrayList<>()))
-                .suggestions(report.getSuggestions() != null ? 
-                    Arrays.asList(report.getSuggestions().split("\n")) : new ArrayList<>())
-                .analysisData(data)
-                .chartsConfig(report.getChartsConfig() != null ? 
-                    objectMapper.readValue(report.getChartsConfig(), Map.class) : null)
-                .createdAt(report.getCreatedAt())
-                .build();
-        } catch (Exception e) {
-            log.error("转换AI报告失败", e);
-            return null;
-        }
+    try {
+        Map<String, Object> data = objectMapper.readValue(report.getAnalysisData(), Map.class);
+        List<String> suggestions = report.getSuggestions() != null 
+            ? Arrays.asList(report.getSuggestions().split("\n")) 
+            : new ArrayList<>();
+        
+        return ExamAiAnalysisVO.builder()
+            .summary(report.getSummary())
+            .strengths((List<String>) data.getOrDefault("strengths", new ArrayList<>()))
+            .weaknesses((List<String>) data.getOrDefault("weaknesses", new ArrayList<>()))
+            .suggestions(suggestions)
+            .analysisData(data)
+            .createdAt(report.getCreatedAt())
+            .build();
+    } catch (Exception e) {
+        log.error("转换AI报告失败", e);
+        return generateMockAiAnalysis();
     }
+}
 
     private ExamAiAnalysisVO generateMockAiAnalysis() {
       Map<String, Object> analysisData = new HashMap<>();

@@ -65,9 +65,8 @@ public class TeachingDashboardService {
     private final HomeworkRepository homeworkRepository;
     private final ExamRepository examRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
-    private final ClassWrongQuestionStatsRepository wrongQuestionStatsRepository;
     private final ActivityRecordRepository activityRecordRepository;
-    private final ActivityAlertRepository activityAlertRepository;
+    private final SubmissionRepository submissionRepository;
     private final ActivityRecordService activityRecordService;
     private final  UserRepository userRepository;  
 
@@ -117,29 +116,22 @@ public class TeachingDashboardService {
             Long classId, Long courseId) {
         
         // 1. 确定查询的班级和课程
-        List<Long> classIds = resolveClassIds(currentUserId, userRole, classId);
+         List<Long> classIds = resolveClassIds(currentUserId, userRole, classId);
         List<Long> courseIds = resolveCourseIds(currentUserId, userRole, courseId);
         
-        // 2. 获取状态卡片数据
         DashboardStatsDTO stats = buildStats(classIds, courseIds);
+        List<ClassScoreDistributionDTO> scoreDistributions = buildScoreDistributions(classIds, courseIds);
         
-        // 3. 获取成绩分布
-        List<ClassScoreDistributionDTO> scoreDistributions = 
-            buildScoreDistributions(classIds, courseIds);
+        // 高频错题排行 - 从作业和考试的知识点得分率计算
+        List<WrongQuestionDTO> topWrongQuestions = buildTopWrongQuestions(classIds, courseIds);
         
-        // 4. 获取高频错题排行
-        List<WrongQuestionDTO> topWrongQuestions = 
-            buildTopWrongQuestions(classIds, courseIds);
+        // 薄弱知识点
+        List<WeakKnowledgePointDTO> weakKnowledgePoints = buildWeakKnowledgePoints(classIds, courseIds);
         
-        // 5. 获取薄弱知识点
-        List<WeakKnowledgePointDTO> weakKnowledgePoints = 
-            buildWeakKnowledgePoints(classIds, courseIds);
+        // 活跃度监控
+        ActivityMonitorDTO activityMonitor = buildActivityMonitor(classIds, courseIds);
         
-        // 6. 获取活跃度监控
-        ActivityMonitorDTO activityMonitor = 
-            buildActivityMonitor(classIds, courseIds);
-        
-        return TeachingDashboardDataDTO.builder()
+         return TeachingDashboardDataDTO.builder()
             .selectedClassIds(classIds)
             .selectedCourseIds(courseIds)
             .stats(stats)
@@ -149,6 +141,7 @@ public class TeachingDashboardService {
             .activityMonitor(activityMonitor)
             .build();
     }
+
 
     /**
      * 解析可见班级ID
@@ -213,78 +206,59 @@ public class TeachingDashboardService {
     /**
      * 构建状态卡片数据
      */
-    private DashboardStatsDTO buildStats(List<Long> classIds, List<Long> courseIds) {
-        // 获取相关学生
+     private DashboardStatsDTO buildStats(List<Long> classIds, List<Long> courseIds) {
         List<Student> students = getStudentsByClasses(classIds);
-        
-        // 统计学生总数
         long studentCount = students.size();
-        
-        // 统计班级数
         long classCount = classIds.size();
-        
-        // 统计课程数
         long courseCount = courseIds.size();
         
         // 待批改作业数
         long pendingHomeworkCount = 0;
         for (Long courseId : courseIds) {
-            List<Homework> pendingHomeworks = homeworkRepository.findByCourseAndStatus(
-                courseRepository.findById(courseId).orElse(null), HomeworkStatus.PENDING);
-            pendingHomeworkCount += pendingHomeworks.size();
+            Course course = courseRepository.findById(courseId).orElse(null);
+            if (course != null) {
+                pendingHomeworkCount += homeworkRepository.findByCourseAndStatus(course, HomeworkStatus.PENDING).size();
+            }
         }
-        
         // 即将开始的考试数
         long upcomingExamCount = 0;
         for (Long classId : classIds) {
             ClassInfo classInfo = classRepository.findById(classId).orElse(null);
             if (classInfo != null) {
-                List<Exam> upcomingExams = examRepository.findByExamDateAfterAndStatus(
-                    LocalDate.now().atStartOfDay(), ExamStatus.UPCOMING);
-                upcomingExamCount += upcomingExams.stream()
-                    .filter(e -> e.getClassInfo().getId().equals(classId))
-                    .count();
+                List<Exam> upcomingExams = examRepository.findByExamDateAfterAndStatus(LocalDate.now().atStartOfDay(), ExamStatus.UPCOMING);
+                upcomingExamCount += upcomingExams.stream().filter(e -> e.getClassInfo() != null && e.getClassInfo().getId().equals(classId)).count();
             }
         }
         
-        // 低活跃度预警数
-        long lowActivityAlertCount = 0;
-        for (Long classId : classIds) {
-            lowActivityAlertCount += activityAlertRepository.findUnresolvedByClassId(classId).size();
-        }
+        // 低活跃度预警数（从 activity_record 计算）
+        long lowActivityAlertCount = countLowActivityStudents(students);
         
         // 薄弱知识点数
         long weakPointCount = 0;
         for (Student student : students) {
-            List<StudentKnowledgeMastery> weakPoints = masteryRepository.findByStudentAndMasteryLevelLessThan(
-                student,  BigDecimal.valueOf(60).doubleValue());
-            weakPointCount += weakPoints.size();
+            weakPointCount += masteryRepository.findByStudentAndMasteryLevelLessThan(student, 60.0).size();
         }
         
         // 整体平均分和及格率
         double totalScore = 0;
         int scoreCount = 0;
         int passCount = 0;
-        
         for (Long courseId : courseIds) {
             List<ExamGrade> grades = examGradeRepository.findByCourseId(courseId);
             for (ExamGrade grade : grades) {
                 if (grade.getScore() != null) {
-                    totalScore += grade.getScore().doubleValue();
+                    totalScore += grade.getScore();
                     scoreCount++;
-                    if (grade.getScore().doubleValue() >= 60) {
-                        passCount++;
-                    }
+                    if (grade.getScore() >= 60) passCount++;
                 }
-            }
+         }
         }
         
         double overallAvgScore = scoreCount > 0 ? totalScore / scoreCount : 0;
         double overallPassRate = scoreCount > 0 ? (passCount * 100.0 / scoreCount) : 0;
-        
         return DashboardStatsDTO.builder()
             .studentCount(studentCount)
-            .teacherCount(0L)  // 暂不统计
+            .teacherCount(0L)
             .classCount(classCount)
             .courseCount(courseCount)
             .pendingHomeworkCount(pendingHomeworkCount)
@@ -296,52 +270,52 @@ public class TeachingDashboardService {
             .build();
     }
 
+    private long countLowActivityStudents(List<Student> students) {
+        LocalDate weekAgo = LocalDate.now().minusDays(7);
+        long count = 0;
+        for (Student student : students) {
+            List<ActivityRecord> records = activityRecordRepository
+                .findByStudentAndActivityDateBetween(student, weekAgo.atStartOfDay(), LocalDate.now().atStartOfDay());
+            double score = records.stream().mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0).sum();
+            if (score < 20) count++;
+        }
+        return count;
+    }
+
     /**
      * 构建成绩分布
      */
-    private List<ClassScoreDistributionDTO> buildScoreDistributions(
-            List<Long> classIds, List<Long> courseIds) {
-        
+    private List<ClassScoreDistributionDTO> buildScoreDistributions(List<Long> classIds, List<Long> courseIds) {
         List<ClassScoreDistributionDTO> result = new ArrayList<>();
-        
         for (Long classId : classIds) {
             ClassInfo classInfo = classRepository.findById(classId).orElse(null);
             if (classInfo == null) continue;
             
             List<Student> students = studentRepository.findByClassInfo(classInfo);
-            
-            // 收集该班级所有相关课程的成绩
             List<Double> allScores = new ArrayList<>();
             for (Long courseId : courseIds) {
                 List<ExamGrade> grades = examGradeRepository.findByClassIdAndCourseId(classId, courseId);
                 for (ExamGrade grade : grades) {
-                    if (grade.getScore() != null) {
-                        allScores.add(grade.getScore().doubleValue());
-                    }
+                    if (grade.getScore() != null) allScores.add(grade.getScore().doubleValue());
                 }
             }
-            
+
             if (allScores.isEmpty()) continue;
             
-            // 成绩分布统计
-            Map<String, Integer> distribution = new LinkedHashMap<>();
+             Map<String, Integer> distribution = new LinkedHashMap<>();
             distribution.put("优秀(>=90)", 0);
             distribution.put("良好(80-89)", 0);
             distribution.put("中等(70-79)", 0);
             distribution.put("及格(60-69)", 0);
             distribution.put("不及格(<60)", 0);
             
-            double totalScore = 0;
-            double highest = 0;
-            double lowest = 100;
-            int passCount = 0;
-            int excellentCount = 0;
+            double totalScore = 0, highest = 0, lowest = 100;
+            int passCount = 0, excellentCount = 0;
             
-            for (Double score : allScores) {
+             for (Double score : allScores) {
                 totalScore += score;
                 highest = Math.max(highest, score);
                 lowest = Math.min(lowest, score);
-                
                 if (score >= 90) {
                     distribution.put("优秀(>=90)", distribution.get("优秀(>=90)") + 1);
                     excellentCount++;
@@ -357,12 +331,8 @@ public class TeachingDashboardService {
                 }
             }
             
-            // 计算标准差
-            double avg = totalScore / allScores.size();
-            double variance = allScores.stream()
-                .mapToDouble(s -> Math.pow(s - avg, 2))
-                .average()
-                .orElse(0);
+           double avg = totalScore / allScores.size();
+            double variance = allScores.stream().mapToDouble(s -> Math.pow(s - avg, 2)).average().orElse(0);
             double stdDev = Math.sqrt(variance);
             
             result.add(ClassScoreDistributionDTO.builder()
@@ -379,42 +349,76 @@ public class TeachingDashboardService {
                 .standardDeviation(Math.round(stdDev * 100) / 100.0)
                 .build());
         }
-        
         return result;
     }
 
     /**
      * 构建高频错题排行
      */
-    private List<WrongQuestionDTO> buildTopWrongQuestions(List<Long> classIds, List<Long> courseIds) {
-        List<WrongQuestionDTO> result = new ArrayList<>();
+   private List<WrongQuestionDTO> buildTopWrongQuestions(List<Long> classIds, List<Long> courseIds) {
+        Map<String, WrongQuestionAggregate> aggregateMap = new HashMap<>();
         
         for (Long courseId : courseIds) {
             Course course = courseRepository.findById(courseId).orElse(null);
             if (course == null) continue;
             
-            for (Long classId : classIds) {
-                List<ClassWrongQuestionStats> stats = 
-                    wrongQuestionStatsRepository.findByClassIdAndCourseIdOrderByErrorRateDesc(classId, courseId);
+            List<Homework> homeworks = homeworkRepository.findByCourse(course);
+            for (Homework homework : homeworks) {
+                List<Long> kpIds = homework.getKnowledgePointIds();
+                if (kpIds == null || kpIds.isEmpty()) continue;
+            
+            // 获取该作业的所有提交
+                List<Submission> submissions = submissionRepository.findGradedByHomeworkId(homework.getId());
+                if (submissions.isEmpty()) continue;
                 
-                for (ClassWrongQuestionStats stat : stats) {
-                    result.add(WrongQuestionDTO.builder()
-                        .knowledgePointId(stat.getKnowledgePoint().getId())
-                        .knowledgePointName(stat.getKnowledgePoint().getName())
-                        .courseId(courseId)
-                        .courseName(course.getName())
-                        .errorCount(stat.getErrorCount())
-                        .totalStudents(stat.getTotalStudents())
-                        .errorRate(stat.getErrorRate())
-                        .rank(stat.getRankInClass())
-                        .build());
-                }
-            }
+                for (Long kpId : kpIds) {
+                    String key = courseId + "_" + kpId;
+                    WrongQuestionAggregate agg = aggregateMap.computeIfAbsent(key, k -> new WrongQuestionAggregate());
+                    agg.knowledgePointId = kpId;
+                    agg.courseId = courseId;
+                    agg.courseName = course.getName();
+                    
+                    // 统计得分<60的学生数作为错误人数
+                    int errorCount = 0;
+                    for (Submission sub : submissions) {
+                        if (sub.getScore() != null && sub.getScore() < 60) {
+                            errorCount++;
+                        }
+                    }
+                    agg.errorCount += errorCount;
+                    agg.totalStudents += submissions.size();
+                }}
         }
         
-        // 按错误率排序，取前10
+        List<WrongQuestionDTO> result = new ArrayList<>();
+        for (WrongQuestionAggregate agg : aggregateMap.values()) {
+            double errorRate = agg.totalStudents > 0 ? agg.errorCount * 100.0 / agg.totalStudents : 0;
+            result.add(WrongQuestionDTO.builder()
+                .knowledgePointId(agg.knowledgePointId)
+                .knowledgePointName(getKnowledgePointName(agg.knowledgePointId))
+                .courseId(agg.courseId)
+                .courseName(agg.courseName)
+                .errorCount(agg.errorCount)
+                .totalStudents(agg.totalStudents)
+                .errorRate(BigDecimal.valueOf(Math.round(errorRate * 100) / 100.0))
+                .build());
+        }
+        
         result.sort((a, b) -> b.getErrorRate().compareTo(a.getErrorRate()));
         return result.stream().limit(10).collect(Collectors.toList());
+    }
+
+     private String getKnowledgePointName(Long kpId) {
+        // 简化实现，实际可从缓存获取
+        return "知识点" + kpId;
+    }
+    
+    private static class WrongQuestionAggregate {
+        Long knowledgePointId;
+        Long courseId;
+        String courseName;
+        int errorCount = 0;
+        int totalStudents = 0;
     }
 
     /**
@@ -427,40 +431,30 @@ public class TeachingDashboardService {
             Course course = courseRepository.findById(courseId).orElse(null);
             if (course == null) continue;
             
-            // 按知识点分组统计
             Map<Long, WeakPointAggregate> aggregateMap = new HashMap<>();
             
             for (Long classId : classIds) {
-                List<StudentKnowledgeMastery> masteries = 
-                    masteryRepository.findByClassIdAndCourseId(classId, courseId);
-                
+                List<StudentKnowledgeMastery> masteries = masteryRepository.findByClassIdAndCourseId(classId, courseId);
                 for (StudentKnowledgeMastery mastery : masteries) {
                     Long kpId = mastery.getKnowledgePoint().getId();
-                    aggregateMap.putIfAbsent(kpId, new WeakPointAggregate());
-                    WeakPointAggregate agg = aggregateMap.get(kpId);
-                    agg.knowledgePointName = mastery.getKnowledgePoint().getName();
+                    WeakPointAggregate agg = aggregateMap.computeIfAbsent(kpId, k -> new WeakPointAggregate());
                     agg.knowledgePointId = kpId;
-                    agg.scores.add(mastery.getMasteryLevel().doubleValue());
+                    agg.knowledgePointName = mastery.getKnowledgePoint().getName();
+                    agg.scores.add(mastery.getMasteryLevel());
                     
-                    if (mastery.getMasteryLevel().doubleValue() < 60) {
+                   if (mastery.getMasteryLevel() < 60) {
                         agg.weakStudents.add(WeakStudentDTO.builder()
                             .studentId(mastery.getStudent().getId())
                             .studentName(mastery.getStudent().getUser().getName())
                             .studentNo(mastery.getStudent().getStudentNo())
-                            .masteryLevel(mastery.getMasteryLevel().doubleValue())
+                            .masteryLevel(mastery.getMasteryLevel())
                             .build());
                     }
                 }
             }
             
-            // 筛选平均掌握度低于70%的知识点
-            for (Map.Entry<Long, WeakPointAggregate> entry : aggregateMap.entrySet()) {
-                WeakPointAggregate agg = entry.getValue();
-                double avgMastery = agg.scores.stream()
-                    .mapToDouble(Double::doubleValue)
-                    .average()
-                    .orElse(100);
-                
+           for (WeakPointAggregate agg : aggregateMap.values()) {
+                double avgMastery = agg.scores.stream().mapToDouble(Double::doubleValue).average().orElse(100);
                 if (avgMastery < 70) {
                     result.add(WeakKnowledgePointDTO.builder()
                         .knowledgePointId(agg.knowledgePointId)
@@ -469,15 +463,14 @@ public class TeachingDashboardService {
                         .courseName(course.getName())
                         .avgMastery(Math.round(avgMastery * 100) / 100.0)
                         .studentCount(agg.scores.size())
-                        .affectedRate(Math.round((agg.weakStudents.size() * 100.0 / agg.scores.size()) * 100) / 100.0)
+                        .affectedRate(agg.scores.isEmpty() ? 0 : Math.round((agg.weakStudents.size() * 100.0 / agg.scores.size()) * 100) / 100.0)
                         .weakStudents(agg.weakStudents.stream().limit(5).collect(Collectors.toList()))
                         .build());
                 }
             }
         }
         
-        // 按平均掌握度排序
-        result.sort((a, b) -> Double.compare(a.getAvgMastery(), b.getAvgMastery()));
+         result.sort((a, b) -> Double.compare(a.getAvgMastery(), b.getAvgMastery()));
         return result.stream().limit(10).collect(Collectors.toList());
     }
 
@@ -489,49 +482,29 @@ public class TeachingDashboardService {
         LocalDate weekAgo = today.minusDays(7);
         LocalDate twoWeeksAgo = today.minusDays(14);
         
-        // 获取相关学生
         List<Student> students = getStudentsByClasses(classIds);
-        Set<Long> studentIds = students.stream()
-            .map(Student::getId)
-            .collect(Collectors.toSet());
         
-        // 计算本周和上周平均活跃度
-        double thisWeekTotal = 0;
-        double lastWeekTotal = 0;
-        int thisWeekCount = 0;
-        int lastWeekCount = 0;
-        
-        // 低活跃度学生统计
+        double thisWeekTotal = 0, lastWeekTotal = 0;
+        int thisWeekCount = 0, lastWeekCount = 0;
         List<LowActivityStudentDTO> lowActivityStudents = new ArrayList<>();
         long lowActivityCount = 0;
         
         for (Student student : students) {
-            Double activityScore = activityRecordService.getStudentTotalActivityScore(student.getId());
-            if (activityScore == null) activityScore = 0.0;
-            
-            // 本周活跃度
             List<ActivityRecord> thisWeekRecords = activityRecordRepository
                 .findByStudentAndActivityDateBetween(student, weekAgo.atStartOfDay(), today.atStartOfDay());
-            double thisWeekScore = thisWeekRecords.stream()
-                .mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0)
-                .sum();
+            double thisWeekScore = thisWeekRecords.stream().mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0).sum();
             thisWeekTotal += thisWeekScore;
             thisWeekCount++;
             
-            // 上周活跃度
-            List<ActivityRecord> lastWeekRecords = activityRecordRepository
+           List<ActivityRecord> lastWeekRecords = activityRecordRepository
                 .findByStudentAndActivityDateBetween(student, twoWeeksAgo.atStartOfDay(), weekAgo.atStartOfDay());
-            double lastWeekScore = lastWeekRecords.stream()
-                .mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0)
-                .sum();
+            double lastWeekScore = lastWeekRecords.stream().mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0).sum();
             lastWeekTotal += lastWeekScore;
             lastWeekCount++;
             
-            // 低活跃度判断（本周活跃度低于20）
             if (thisWeekScore < 20) {
                 lowActivityCount++;
-                Integer studyDuration = activityRecordService.getStudentStudyDuration(
-                    student.getId(), weekAgo);
+                Integer studyDuration = activityRecordService.getStudentStudyDuration(student.getId(), weekAgo);
                 lowActivityStudents.add(LowActivityStudentDTO.builder()
                     .studentId(student.getId())
                     .studentName(student.getUser().getName())
@@ -545,37 +518,32 @@ public class TeachingDashboardService {
         double thisWeekAvg = thisWeekCount > 0 ? thisWeekTotal / thisWeekCount : 0;
         double lastWeekAvg = lastWeekCount > 0 ? lastWeekTotal / lastWeekCount : 0;
         
-        // 严重预警
+        // 严重预警（从 activity_record 计算）
         List<CriticalAlertDTO> criticalAlerts = new ArrayList<>();
         long criticalAlertCount = 0;
-        
-        for (Long classId : classIds) {
-            List<ActivityAlert> alerts = activityAlertRepository.findUnresolvedByClassId(classId);
-            for (ActivityAlert alert : alerts) {
-                if ("CRITICAL".equals(alert.getAlertLevel())) {
-                    criticalAlertCount++;
-                    criticalAlerts.add(CriticalAlertDTO.builder()
-                        .alertId(alert.getId())
-                        .studentId(alert.getStudent().getId())
-                        .studentName(alert.getStudent().getUser().getName())
-                        .studentNo(alert.getStudent().getStudentNo())
-                        .alertType(alert.getAlertType())
-                        .alertLevel(alert.getAlertLevel())
-                        .activityScore(alert.getActivityScore())
-                        .threshold(alert.getThreshold())
-                        .build());
-                }
+        for (Student student : students) {
+            List<ActivityRecord> records = activityRecordRepository
+                .findByStudentAndActivityDateBetween(student, weekAgo.atStartOfDay(), today.atStartOfDay());
+            double score = records.stream().mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0).sum();
+            if (score < 10) {
+                criticalAlertCount++;
+                criticalAlerts.add(CriticalAlertDTO.builder()
+                    .studentId(student.getId())
+                    .studentName(student.getUser().getName())
+                    .studentNo(student.getStudentNo())
+                    .alertType("LOW_ACTIVITY")
+                    .alertLevel("CRITICAL")
+                    .activityScore(BigDecimal.valueOf(score))
+                    .threshold(BigDecimal.valueOf(10.0))
+                    .build());
             }
+        } 
+       long activeStudentCount = 0;
+        for (Student student : students) {
+            List<ActivityRecord> records = activityRecordRepository
+                .findByStudentAndActivityDateBetween(student, weekAgo.atStartOfDay(), today.atStartOfDay());
+            if (!records.isEmpty()) activeStudentCount++;
         }
-        
-        // 活跃学生数（本周活跃度>0）
-        long activeStudentCount = students.stream()
-            .filter(s -> {
-                List<ActivityRecord> records = activityRecordRepository
-                    .findByStudentAndActivityDateBetween(s, weekAgo.atStartOfDay(), today.atStartOfDay());
-                return !records.isEmpty();
-            })
-            .count();
         
         return ActivityMonitorDTO.builder()
             .classAvgActivityScore(Math.round(thisWeekAvg * 100) / 100.0)
@@ -593,20 +561,15 @@ public class TeachingDashboardService {
     /**
      * 获取班级下的学生列表
      */
-    private List<Student> getStudentsByClasses(List<Long> classIds) {
+     private List<Student> getStudentsByClasses(List<Long> classIds) {
         List<Student> students = new ArrayList<>();
         for (Long classId : classIds) {
             ClassInfo classInfo = classRepository.findById(classId).orElse(null);
-            if (classInfo != null) {
-                students.addAll(studentRepository.findByClassInfo(classInfo));
-            }
+            if (classInfo != null) students.addAll(studentRepository.findByClassInfo(classInfo));
         }
         return students;
     }
 
-    /**
-     * 内部聚合类
-     */
     private static class WeakPointAggregate {
         Long knowledgePointId;
         String knowledgePointName;

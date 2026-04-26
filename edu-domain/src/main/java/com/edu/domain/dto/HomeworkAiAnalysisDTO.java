@@ -4,8 +4,10 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
+import lombok.Builder;
 import lombok.Data;
 
+@Builder
 @Data
 public class HomeworkAiAnalysisDTO {
     private String summary;                    // 分析摘要

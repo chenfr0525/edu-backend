@@ -267,30 +267,40 @@ public class CourseAnalysisService {
     }
 
     private KnowledgePointVO convertToKnowledgePointVO(KnowledgePoint kp, Long courseId) {
-        // 计算班级平均掌握度
-        Double avgMastery = masteryRepository.getClassAvgMastery(kp.getId(), null);
-        if (avgMastery == null) avgMastery = 0.0;
-        
-        // 统计子知识点数量
-        int childCount = knowledgePointRepository.findByParentId(kp.getId()).size();
-        
-        // 判断薄弱程度
-        String weaknessLevel = getWeaknessLevel(avgMastery);
-        
-        return KnowledgePointVO.builder()
-            .id(kp.getId())
-            .name(kp.getName())
-            .description(kp.getDescription())
-            .parentId(kp.getParent() != null ? kp.getParent().getId() : null)
-            .parentName(kp.getParent() != null ? kp.getParent().getName() : null)
-            .level(kp.getLevel())
-            .sortOrder(kp.getSortOrder())
-            .childCount(childCount)
-            .classAvgMastery(BigDecimal.valueOf(avgMastery).setScale(2, RoundingMode.HALF_UP))
-            .weaknessLevel(weaknessLevel)
-            .children(new ArrayList<>())
-            .build();
+    // 从 knowledge_point_score_detail 表获取班级平均掌握度
+    // 需要班级ID，这里如果无法获取则返回0
+    Double avgMastery = 0.0;
+    
+    // 尝试获取该课程下所有学生的班级（简化：取第一个班级）
+    List<Student> students = studentRepository.findByEnrollmentsCourse(courseId != null ? 
+        courseRepository.findById(courseId).orElse(null) : null);
+    if (students != null && !students.isEmpty() && students.get(0).getClassInfo() != null) {
+        Long classId = students.get(0).getClassInfo().getId();
+        BigDecimal classAvg = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
+        if (classAvg != null) {
+            avgMastery = classAvg.doubleValue();
+        }
     }
+         // 统计子知识点数量
+    int childCount = knowledgePointRepository.findByParentId(kp.getId()).size();
+    
+    // 判断薄弱程度
+    String weaknessLevel = getWeaknessLevel(avgMastery);
+    
+    return KnowledgePointVO.builder()
+        .id(kp.getId())
+        .name(kp.getName())
+        .description(kp.getDescription())
+        .parentId(kp.getParent() != null ? kp.getParent().getId() : null)
+        .parentName(kp.getParent() != null ? kp.getParent().getName() : null)
+        .level(kp.getLevel())
+        .sortOrder(kp.getSortOrder())
+        .childCount(childCount)
+        .classAvgMastery(BigDecimal.valueOf(avgMastery).setScale(2, RoundingMode.HALF_UP))
+        .weaknessLevel(weaknessLevel)
+        .children(new ArrayList<>())
+        .build();
+}
 
     @Transactional
     public KnowledgePoint createKnowledgePoint(KnowledgePointCreateRequest request) {
@@ -544,37 +554,52 @@ public class CourseAnalysisService {
             .build();
     }
 
-    private KnowledgePointStatsVO calculateKnowledgePointStats(KnowledgePoint kp, List<Student> students) {
-        List<Double> masteries = new ArrayList<>();
-        int masteredCount = 0;
-        int weakCount = 0;
-        
-        for (Student student : students) {
-            Double mastery = masteryRepository.getStudentKnowledgeMastery(student.getId(), kp.getId());
-            if (mastery != null) {
-                masteries.add(mastery);
-                if (mastery >= 70) masteredCount++;
-                if (mastery < 50) weakCount++;
-            }
-        }
-        
-        double avg = masteries.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        double highest = masteries.stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        double lowest = masteries.stream().mapToDouble(Double::doubleValue).min().orElse(0);
-        
+   private KnowledgePointStatsVO calculateKnowledgePointStats(KnowledgePoint kp, List<Student> students) {
+    if (students == null || students.isEmpty()) {
         return KnowledgePointStatsVO.builder()
-            .classAvgMastery(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP))
-            .highestMastery(BigDecimal.valueOf(highest).setScale(2, RoundingMode.HALF_UP))
-            .lowestMastery(BigDecimal.valueOf(lowest).setScale(2, RoundingMode.HALF_UP))
-            .masteredCount(masteredCount)
-            .weakCount(weakCount)
-            .totalStudents(students.size())
+            .classAvgMastery(BigDecimal.ZERO)
+            .highestMastery(BigDecimal.ZERO)
+            .lowestMastery(BigDecimal.ZERO)
+            .masteredCount(0)
+            .weakCount(0)
+            .totalStudents(0)
             .build();
     }
-
-    private int countInRange(List<Double> list, double min, double max) {
-        return (int) list.stream().filter(v -> v >= min && v <= max).count();
+        
+       Long classId = students.get(0).getClassInfo() != null ? students.get(0).getClassInfo().getId() : null;
+    BigDecimal classAvgMastery = BigDecimal.ZERO;
+    if (classId != null) {
+        classAvgMastery = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
+        if (classAvgMastery == null) classAvgMastery = BigDecimal.ZERO;
     }
+    
+    // 获取学生的掌握度列表
+    List<Double> masteries = new ArrayList<>();
+    int masteredCount = 0;
+    int weakCount = 0;
+
+     for (Student student : students) {
+        // 从 student_knowledge_mastery 表获取
+        Double mastery = masteryRepository.getStudentKnowledgeMastery(student.getId(), kp.getId());
+        if (mastery != null) {
+            masteries.add(mastery);
+            if (mastery >= 70) masteredCount++;
+            if (mastery < 50) weakCount++;
+        }
+    }
+
+    double highest = masteries.stream().mapToDouble(Double::doubleValue).max().orElse(0);
+    double lowest = masteries.stream().mapToDouble(Double::doubleValue).min().orElse(0);
+    
+    return KnowledgePointStatsVO.builder()
+        .classAvgMastery(classAvgMastery)
+        .highestMastery(BigDecimal.valueOf(highest).setScale(2, RoundingMode.HALF_UP))
+        .lowestMastery(BigDecimal.valueOf(lowest).setScale(2, RoundingMode.HALF_UP))
+        .masteredCount(masteredCount)
+        .weakCount(weakCount)
+        .totalStudents(students.size())
+        .build();
+}
 
     private List<StudentMasteryVO> getStudentMasteryList(KnowledgePoint kp, List<Student> students) {
         List<StudentMasteryVO> result = new ArrayList<>();
@@ -654,11 +679,11 @@ public class CourseAnalysisService {
     }
 
     private String getWeaknessLevel(double mastery) {
-        if (mastery >= 70) return "GOOD";
-        if (mastery >= 60) return "MILD";
-        if (mastery >= 50) return "MODERATE";
-        return "SEVERE";
-    }
+    if (mastery >= 70) return "GOOD";
+    if (mastery >= 60) return "MILD";
+    if (mastery >= 50) return "MODERATE";
+    return "SEVERE";
+}
 
     // ==================== 8. ECharts图表数据 ====================
 
@@ -717,22 +742,33 @@ public class CourseAnalysisService {
     }
 
     private RadarChartData getRadarChartData(Course course, List<Student> students) {
-        List<KnowledgePoint> kps = knowledgePointRepository.findByCourseOrderBySortOrderAsc(course);
-        
-        List<String> indicators = new ArrayList<>();
-        List<BigDecimal> classAvgValues = new ArrayList<>();
-        
-        for (KnowledgePoint kp : kps) {
-            indicators.add(kp.getName());
-            Double avgMastery = masteryRepository.getClassAvgMastery(kp.getId(), null);
-            classAvgValues.add(avgMastery != null ? BigDecimal.valueOf(avgMastery) : BigDecimal.ZERO);
-        }
-        
-        return RadarChartData.builder()
-            .indicators(indicators)
-            .classAvg(classAvgValues)
-            .build();
+    List<KnowledgePoint> kps = knowledgePointRepository.findByCourseOrderBySortOrderAsc(course);
+    
+    List<String> indicators = new ArrayList<>();
+    List<BigDecimal> classAvgValues = new ArrayList<>();
+    
+    // 获取班级ID（从第一个学生获取）
+    Long classId = null;
+    if (students != null && !students.isEmpty() && students.get(0).getClassInfo() != null) {
+        classId = students.get(0).getClassInfo().getId();
     }
+    for (KnowledgePoint kp : kps) {
+        indicators.add(kp.getName());
+        
+        // 从 knowledge_point_score_detail 表获取班级平均掌握度
+        BigDecimal avgMastery = BigDecimal.ZERO;
+        if (classId != null) {
+            avgMastery = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
+            if (avgMastery == null) avgMastery = BigDecimal.ZERO;
+        }
+        classAvgValues.add(avgMastery);
+    }
+    
+    return RadarChartData.builder()
+        .indicators(indicators)
+        .classAvg(classAvgValues)
+        .build();
+}
 
     private ScoreDistributionPie getScoreDistributionPie(Course course) {
         List<ExamGrade> grades = examGradeRepository.findByCourseId(course.getId());

@@ -233,7 +233,7 @@ CREATE TABLE `activity_record` (
     `type` VARCHAR(20) NOT NULL DEFAULT 'visit' COMMENT '类型: LOGIN/HOMEWORK/EXAM/RESOURCE/VIDEO',
     `description` TEXT COMMENT '描述',
     `activity_date` DATE NOT NULL COMMENT '活动日期',
-    `study_duration` INT NOT NULL DEFAULT 0 COMMENT '学习时长(分钟)',
+    `study_duration` INT DEFAULT 0 COMMENT '学习时长(分钟)',
     PRIMARY KEY (`id`),
     KEY `idx_student_id` (`student_id`),
     KEY `idx_activity_date` (`activity_date`)

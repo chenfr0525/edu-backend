@@ -1,18 +1,14 @@
-// com/edu/service/TeacherDashboardAiService.java
 package com.edu.service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.edu.domain.*;
-import com.edu.domain.dto.AiAnalysisReportDTO;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,8 +18,6 @@ public class TeacherDashboardAiService {
     private final DeepSeekService deepSeekService;
     private final AiAnalysisReportService aiReportService;
     private final SemesterService semesterService;
-    
-    // 注入需要的 Repository
     private final ClassRepository classRepository;
     private final CourseRepository courseRepository;
     private final StudentRepository studentRepository;
@@ -32,7 +26,7 @@ public class TeacherDashboardAiService {
     private final SubmissionRepository submissionRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
 
-    /**
+     /**
      * 获取或创建 AI 分析报告
      * 优先从数据库读取，如果没有或过期则调用 AI 生成
      */
@@ -60,7 +54,7 @@ public class TeacherDashboardAiService {
         return newReport;
     }
     
-    /**
+   /**
      * 手动刷新 AI 分析报告
      */
     public AiAnalysisReport refreshReport(String targetType, Long targetId, String reportType) {
@@ -77,7 +71,7 @@ public class TeacherDashboardAiService {
         return generateReport(targetType, targetId, reportType);
     }
     
-    /**
+     /**
      * 调用 AI 生成报告
      */
     private AiAnalysisReport generateReport(String targetType, Long targetId, String reportType) {
@@ -103,7 +97,7 @@ public class TeacherDashboardAiService {
                 targetName = course != null ? course.getName() : "未知课程";
             }
             
-            // 4. 构建分析数据 JSON
+            // 4. 构建分析数据 JSON（移除 chartsConfig）
             JSONObject analysisData = new JSONObject();
             analysisData.put("targetId", targetId);
             analysisData.put("targetName", targetName);
@@ -113,12 +107,11 @@ public class TeacherDashboardAiService {
             analysisData.put("aiSummary", aiResponse.getSummary());
             analysisData.put("aiSuggestions", aiResponse.getSuggestions());
             
-            Semester currentSemester = getCurrentSemester();
-            
+            // semester 字段设为 null（学期表已废弃）
             return AiAnalysisReport.builder()
                 .targetType(targetType)
                 .targetId(targetId)
-                .semester(currentSemester)
+                .semester(null)
                 .reportType(reportType)
                 .analysisData(analysisData.toJSONString())
                 .summary(aiResponse.getSummary())
@@ -132,17 +125,16 @@ public class TeacherDashboardAiService {
         }
     }
     
-    /**
+     /**
      * 收集 Dashboard 数据
      */
     private JSONObject collectDashboardData(String targetType, Long targetId) {
         JSONObject data = new JSONObject();
 
-        // 添加参数校验
-    if (targetId == null) {
-        log.warn("targetId 为空，无法收集仪表盘数据");
-        return data;
-    }
+        if (targetId == null) {
+            log.warn("targetId 为空，无法收集仪表盘数据");
+            return data;
+        }
         
         if ("CLASS".equals(targetType)) {
             ClassInfo classInfo = classRepository.findById(targetId).orElse(null);
@@ -221,7 +213,7 @@ public class TeacherDashboardAiService {
                 if (!allSubmissions.isEmpty()) {
                     double homeworkAvg = allSubmissions.stream()
                         .filter(s -> s.getScore() != null)
-                       .mapToDouble(Submission::getScore)  
+                        .mapToDouble(Submission::getScore)
                         .average()
                         .orElse(0);
                     data.put("homeworkAvgScore", Math.round(homeworkAvg * 100) / 100.0);
@@ -232,18 +224,15 @@ public class TeacherDashboardAiService {
         return data;
     }
     
-    /**
+     /**
      * 创建降级报告
      */
     private AiAnalysisReport createFallbackReport(String targetType, Long targetId, String reportType) {
-      // 添加参数校验
-    if (targetId == null) {
-        log.error("targetId 为空，无法创建降级报告");
-        throw new IllegalArgumentException("targetId 不能为空");
-    }
+        if (targetId == null) {
+            log.error("targetId 为空，无法创建降级报告");
+            throw new IllegalArgumentException("targetId 不能为空");
+        }
 
-        Semester currentSemester = getCurrentSemester();
-        
         String targetName = "";
         if ("CLASS".equals(targetType)) {
             ClassInfo classInfo = classRepository.findById(targetId).orElse(null);
@@ -267,20 +256,12 @@ public class TeacherDashboardAiService {
         return AiAnalysisReport.builder()
             .targetType(targetType)
             .targetId(targetId)
-            .semester(currentSemester)
+            .semester(null)  // semester 已废弃
             .reportType(reportType)
             .analysisData(analysisData.toJSONString())
             .summary(fallbackSummary)
             .suggestions(fallbackSuggestions)
             .createdAt(LocalDateTime.now())
             .build();
-    }
-    
-    private Semester getCurrentSemester() {
-        List<Semester> semesters = semesterService.findAll();
-        return semesters.stream()
-                .filter(Semester::getIsCurrent)
-                .findFirst()
-                .orElse(null);
     }
 }

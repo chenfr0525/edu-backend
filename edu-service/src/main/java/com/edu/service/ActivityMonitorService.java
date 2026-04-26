@@ -657,6 +657,7 @@ public class ActivityMonitorService {
         record.setDescription(description);
         record.setActivityDate(activityDate);
         record.setActivityScore(activityScore);
+        record.setInteractionCount(0);
         
         if ("STUDY_DURATION".equals(activityType)) {
             Integer duration = row.get("studyDuration") != null ? ((Number) row.get("studyDuration")).intValue() : 0;

@@ -231,59 +231,59 @@ public class StudentKnowledgeAnalysisService {
         return progress;
     }
     
-    /**
-     * 4. 获取知识点雷达图数据 - 保持不变
-     */
-    public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long courseId) {
-        // ... 保持不变 ...
-        Student student = studentService.findById(studentId)
-                .orElseThrow(() -> new RuntimeException("学生不存在"));
+   /**
+ * 4. 获取知识点雷达图数据 - 修改班级平均掌握度计算方式
+ */
+public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long courseId) {
+    Student student = studentService.findById(studentId)
+            .orElseThrow(() -> new RuntimeException("学生不存在"));
+
+         if (courseId == null || courseId == 0) {
+        KnowledgePointRadarDTO empty = new KnowledgePointRadarDTO();
+        empty.setIndicators(new ArrayList<>());
+        empty.setMyValues(new ArrayList<>());
+        empty.setClassAvgValues(new ArrayList<>());
+        return empty;
+    }
+    
+    Course course = courseService.findById(courseId)
+            .orElseThrow(() -> new RuntimeException("课程不存在"));
         
-        if (courseId == null || courseId == 0) {
-            KnowledgePointRadarDTO empty = new KnowledgePointRadarDTO();
-            empty.setIndicators(new ArrayList<>());
-            empty.setMyValues(new ArrayList<>());
-            empty.setClassAvgValues(new ArrayList<>());
-            return empty;
-        }
-        
-        Course course = courseService.findById(courseId)
-                .orElseThrow(() -> new RuntimeException("课程不存在"));
-        
-        List<KnowledgePoint> knowledgePoints = knowledgePointService.findByCourse(course);
-        
-        List<String> indicators = new ArrayList<>();
-        List<BigDecimal> myValues = new ArrayList<>();
-        List<BigDecimal> classAvgValues = new ArrayList<>();
+       List<KnowledgePoint> knowledgePoints = knowledgePointService.findByCourse(course);
+    
+    List<String> indicators = new ArrayList<>();
+    List<BigDecimal> myValues = new ArrayList<>();
+    List<BigDecimal> classAvgValues = new ArrayList<>();
         
         Long classId = student.getClassInfo() != null ? student.getClassInfo().getId() : null;
-        
-        for (KnowledgePoint kp : knowledgePoints) {
-            indicators.add(kp.getName());
+    
+    for (KnowledgePoint kp : knowledgePoints) {
+        indicators.add(kp.getName());
             
-            Optional<StudentKnowledgeMastery> mastery = masteryService.findByStudentAndKnowledgePoint(student, kp);
-            if (mastery.isPresent()) {
-                myValues.add(BigDecimal.valueOf(mastery.get().getMasteryLevel()).setScale(2, RoundingMode.HALF_UP));
-            } else {
-                myValues.add(BigDecimal.ZERO);
-            }
-            
-            if (classId != null) {
-                BigDecimal classAvg = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-                classAvgValues.add(classAvg != null ? classAvg.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
-            } else {
-                classAvgValues.add(BigDecimal.ZERO);
-            }
+            // 获取学生自己的掌握度（从 student_knowledge_mastery）
+        Optional<StudentKnowledgeMastery> mastery = masteryService.findByStudentAndKnowledgePoint(student, kp);
+        if (mastery.isPresent()) {
+            myValues.add(BigDecimal.valueOf(mastery.get().getMasteryLevel()).setScale(2, RoundingMode.HALF_UP));
+        } else {
+            myValues.add(BigDecimal.ZERO);
         }
+            if (classId != null) {
+            // 使用 kpScoreDetailRepository 计算班级平均得分率
+            BigDecimal classAvg = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
+            classAvgValues.add(classAvg != null ? classAvg.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+        } else {
+            classAvgValues.add(BigDecimal.ZERO);
+        }
+    }
         
-        KnowledgePointRadarDTO radar = new KnowledgePointRadarDTO();
-        radar.setIndicators(indicators);
-        radar.setMyValues(myValues);
-        radar.setClassAvgValues(classAvgValues);
-        radar.setCourseId(courseId);
-        radar.setCourseName(course.getName());
-        
-        return radar;
+       KnowledgePointRadarDTO radar = new KnowledgePointRadarDTO();
+    radar.setIndicators(indicators);
+    radar.setMyValues(myValues);
+    radar.setClassAvgValues(classAvgValues);
+    radar.setCourseId(courseId);
+    radar.setCourseName(course.getName());
+    
+    return radar;
     }
     
     /**

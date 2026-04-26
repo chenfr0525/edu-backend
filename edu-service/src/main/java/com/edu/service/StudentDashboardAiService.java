@@ -5,7 +5,6 @@ import com.alibaba.fastjson.JSONObject;
 import com.edu.domain.ActivityRecord;
 import com.edu.domain.AiAnalysisReport;
 import com.edu.domain.ExamGrade;
-import com.edu.domain.Semester;
 import com.edu.domain.Student;
 import com.edu.domain.StudentKnowledgeMastery;
 import com.edu.domain.Submission;
@@ -14,8 +13,6 @@ import com.edu.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -26,10 +23,7 @@ public class StudentDashboardAiService {
 
     private final DeepSeekService deepSeekService;
     private final AiAnalysisReportService aiReportService;
-    private final SemesterService semesterService;
     private final StudentService studentService;
-    
-    // 注入需要的 Repository
     private final ExamGradeRepository examGradeRepository;
     private final SubmissionRepository submissionRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
@@ -37,7 +31,6 @@ public class StudentDashboardAiService {
 
     /**
      * 获取学生 Dashboard 的 AI 分析报告
-     * 优先从数据库读取，如果没有或过期则调用 AI 生成
      */
     public AiAnalysisReport getOrCreateDashboardReport(Long studentId) {
         Student student = studentService.findById(studentId)
@@ -48,7 +41,6 @@ public class StudentDashboardAiService {
             "STUDENT_DASHBOARD", studentId, "COMPREHENSIVE"
         );
         
-        // 如果存在且是7天内的报告，直接返回
         if (cachedReport != null && 
             cachedReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
             log.info("使用缓存的 Dashboard AI 报告，学生ID: {}, 创建时间: {}", 
@@ -56,12 +48,11 @@ public class StudentDashboardAiService {
             return cachedReport;
         }
         
-        // 2. 没有缓存或已过期，调用 AI 生成新报告
+        // 2. 生成新报告
         log.info("生成新的 Dashboard AI 报告，学生ID: {}", studentId);
         
         AiAnalysisReport newReport = generateDashboardReport(student);
         
-        // 3. 保存到数据库
         if (newReport != null) {
             aiReportService.save(newReport);
         }
@@ -85,23 +76,21 @@ public class StudentDashboardAiService {
             }
         }
         
-        // 强制重新生成
         AiAnalysisReport newReport = generateDashboardReport(student);
         if (newReport != null) {
             aiReportService.save(newReport);
         }
         return newReport;
     }
+ 
     
-    /**
+     /**
      * 调用 AI 生成 Dashboard 综合分析报告
      */
     private AiAnalysisReport generateDashboardReport(Student student) {
         try {
-            // 1. 收集学生数据
             JSONObject studentData = collectStudentData(student);
             
-            // 2. 构建 Prompt 并调用 AI
             AiSuggestionDTO aiResponse = deepSeekService.analyzeData(
                 studentData.toJSONString(),
                 "学生综合学情分析"
@@ -112,7 +101,6 @@ public class StudentDashboardAiService {
                 return createFallbackReport(student);
             }
             
-            // 3. 构建分析数据 JSON
             JSONObject analysisData = new JSONObject();
             analysisData.put("studentId", student.getId());
             analysisData.put("studentName", student.getUser().getName());
@@ -121,14 +109,11 @@ public class StudentDashboardAiService {
             analysisData.put("aiSummary", aiResponse.getSummary());
             analysisData.put("aiSuggestions", aiResponse.getSuggestions());
             
-            // 4. 获取当前学期
-            Semester currentSemester = getCurrentSemester();
-            
-            // 5. 构建并返回报告
+            // semester 设为 null
             return AiAnalysisReport.builder()
                 .targetType("STUDENT_DASHBOARD")
                 .targetId(student.getId())
-                .semester(currentSemester)
+                .semester(null)
                 .reportType("COMPREHENSIVE")
                 .analysisData(analysisData.toJSONString())
                 .summary(aiResponse.getSummary())
@@ -141,9 +126,9 @@ public class StudentDashboardAiService {
             return createFallbackReport(student);
         }
     }
-    
-    /**
-     * 收集学生所有相关数据，用于 AI 分析
+
+     /**
+     * 收集学生所有相关数据
      */
     private JSONObject collectStudentData(Student student) {
         Long studentId = student.getId();
@@ -161,8 +146,6 @@ public class StudentDashboardAiService {
                 JSONObject exam = new JSONObject();
                 exam.put("name", eg.getExam().getName());
                 exam.put("score", eg.getScore());
-                exam.put("classRank", eg.getClassRank());
-                exam.put("scoreTrend", eg.getScoreTrend());
                 examList.add(exam);
                 examTotal += eg.getScore();
             }
@@ -173,28 +156,24 @@ public class StudentDashboardAiService {
             data.put("totalExams", 0);
         }
         
-        // 2. 作业数据
+        // 2. 作业数据（移除 submissionLateMinutes 依赖）
         List<Submission> submissions = submissionRepository.findGradedByStudentId(studentId);
         if (submissions != null && !submissions.isEmpty()) {
             List<JSONObject> homeworkList = new ArrayList<>();
             double homeworkTotal = 0;
-            long lateCount = 0;
             for (Submission sub : submissions) {
                 JSONObject hw = new JSONObject();
                 hw.put("name", sub.getHomework().getName());
                 hw.put("score", sub.getScore());
                 hw.put("classAvg", sub.getHomework().getAvgScore());
                 homeworkList.add(hw);
-                homeworkTotal += sub.getScore();
-                if (sub.getSubmissionLateMinutes() != null && sub.getSubmissionLateMinutes() > 0) {
-                    lateCount++;
+                if (sub.getScore() != null) {
+                    homeworkTotal += sub.getScore();
                 }
             }
             data.put("homeworks", homeworkList);
             data.put("homeworkAvgScore", homeworkTotal / submissions.size());
             data.put("totalHomeworks", submissions.size());
-            data.put("homeworkLateCount", lateCount);
-            data.put("homeworkOnTimeRate", (submissions.size() - lateCount) * 100.0 / submissions.size());
         } else {
             data.put("totalHomeworks", 0);
         }
@@ -228,7 +207,7 @@ public class StudentDashboardAiService {
         // 4. 活跃度数据
         LocalDateTime thirtyDaysAgo = LocalDateTime.now().minusDays(30);
         List<ActivityRecord> recentActivities = activityRecordRepository
-            .findByStudentIdAndActivityDateAfter(studentId, thirtyDaysAgo.toLocalDate());
+            .findByStudentIdAndActivityDateAfter(studentId, thirtyDaysAgo);
         if (recentActivities != null && !recentActivities.isEmpty()) {
             double totalDuration = recentActivities.stream()
                 .mapToInt(ActivityRecord::getStudyDuration)
@@ -243,14 +222,9 @@ public class StudentDashboardAiService {
         return data;
     }
     
-    /**
-     * 创建降级报告（AI 调用失败时使用）
-     */
     private AiAnalysisReport createFallbackReport(Student student) {
-        Semester currentSemester = getCurrentSemester();
-        
         String fallbackSummary = "基于当前学习数据，整体表现良好。建议继续保持学习节奏，针对薄弱知识点加强练习。";
-        String fallbackSuggestions = "1. 按时完成作业，避免迟交\n2. 针对薄弱知识点进行专项练习\n3. 积极参与课堂互动，提高活跃度\n4. 定期复习错题，巩固记忆";
+        String fallbackSuggestions = "1. 按时完成作业\n2. 针对薄弱知识点进行专项练习\n3. 积极参与课堂互动，提高活跃度\n4. 定期复习错题，巩固记忆";
         
         JSONObject analysisData = new JSONObject();
         analysisData.put("studentId", student.getId());
@@ -260,20 +234,12 @@ public class StudentDashboardAiService {
         return AiAnalysisReport.builder()
             .targetType("STUDENT_DASHBOARD")
             .targetId(student.getId())
-            .semester(currentSemester)
+            .semester(null)
             .reportType("COMPREHENSIVE")
             .analysisData(analysisData.toJSONString())
             .summary(fallbackSummary)
             .suggestions(fallbackSuggestions)
             .createdAt(LocalDateTime.now())
             .build();
-    }
-    
-    private Semester getCurrentSemester() {
-        List<Semester> semesters = semesterService.findAll();
-        return semesters.stream()
-                .filter(Semester::getIsCurrent)
-                .findFirst()
-                .orElse(null);
     }
 }

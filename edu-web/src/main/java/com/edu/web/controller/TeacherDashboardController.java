@@ -11,6 +11,8 @@ import com.edu.domain.dto.WeakKnowledgePointDTO;
 import com.edu.domain.dto.WrongQuestionDTO;
 import com.edu.repository.ClassRepository;
 import com.edu.repository.CourseRepository;
+import com.edu.repository.HomeworkRepository;
+import com.edu.repository.SubmissionRepository;
 import com.edu.service.ActivityAlertService;
 import com.edu.service.ActivityRecordService;
 import com.edu.service.AiAnalysisReportService;
@@ -29,6 +31,7 @@ import com.edu.service.TeachingDashboardService;
 
 import lombok.RequiredArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -44,10 +47,10 @@ public class TeacherDashboardController {
     private final StudentService studentService;
     private final ExamGradeService examGradeService;
     private final ExamService examService;
-    private final ClassWrongQuestionStatsService wrongQuestionStatsService;
+    private final HomeworkRepository homeworkRepository;
     private final StudentKnowledgeMasteryService masteryService;
     private final ActivityRecordService activityRecordService;
-    private final ActivityAlertService alertService;
+    private final SubmissionRepository submissionRepository;
     private final AiAnalysisReportService aiReportService;
     private final SubmissionService submissionService;
      private final TeachingDashboardService dashboardService;
@@ -73,14 +76,14 @@ public class TeacherDashboardController {
             return Result.error("班级不存在");
         }
 
-         // 权限校验：管理员可以看到所有班级，教师只能看到自己教的班级
-    if (!"ADMIN".equals(currentUser.getRole().name())) {
-        List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(currentUser.getId());
-        boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
-        if (!hasAccess) {
-            return Result.error("无权访问该班级数据");
+          // 权限校验
+        if (!"ADMIN".equals(currentUser.getRole().name())) {
+            List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(currentUser.getId());
+            boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
+            if (!hasAccess) {
+                return Result.error("无权访问该班级数据");
+            }
         }
-    }
 
         Map<String, Object> classInfoMap = new HashMap<>();
         classInfoMap.put("id", classInfo.getId());
@@ -148,67 +151,65 @@ public class TeacherDashboardController {
         }
         
         // 4. 高频错题排行（前10）
-        List<ClassWrongQuestionStats> wrongQuestions = 
-            wrongQuestionStatsService.findTopWrongQuestions(classInfo, LocalDate.now());
-        dashboard.put("topWrongQuestions", wrongQuestions.stream().limit(10).map(wq -> 
-            {
-                 Map<String, Object> map = new HashMap<>();
-                map.put( "knowledgePointId", wq.getKnowledgePoint().getId());
-                map.put( "knowledgePointName", wq.getKnowledgePoint().getName());
-                map.put( "errorCount", wq.getErrorCount());
-                map.put(  "rank", wq.getRankInClass());
-                return map;
-            }).collect(Collectors.toList()));
+        List<WrongQuestionDTO> topWrongQuestions = calculateTopWrongQuestions(classId);
+        dashboard.put("topWrongQuestions", topWrongQuestions.stream().limit(10).map(wq -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("knowledgePointId", wq.getKnowledgePointId());
+            map.put("knowledgePointName", wq.getKnowledgePointName());
+            map.put("errorCount", wq.getErrorCount());
+            map.put("rank", 0);
+            return map;
+        }).collect(Collectors.toList()));
         
-        // 5. 班级薄弱知识点（平均掌握度低于60%）
+       // 5. 班级薄弱知识点（保持不变）
         List<Map<String, Object>> weakKnowledgePoints = findClassWeakPointsWithDetails(classInfo);
         dashboard.put("weakKnowledgePoints", weakKnowledgePoints);
         
-        // 6. 活跃度监控
+        // 6-8. 活跃度相关（从 activity_record 计算，移除 ActivityAlert）
         LocalDate weekAgo = LocalDate.now().minusDays(7);
-        List<Long> lowActivityStudentIds = activityRecordService.findLowActivityStudents(weekAgo, 20.0);
         
-        // 获取低活跃度学生详情
+        // 低活跃度学生列表
         List<Map<String, Object>> lowActivityStudents = new ArrayList<>();
-        for (Long studentId : lowActivityStudentIds) {
-            Student student = studentService.findById(studentId).orElse(null);
-            if (student != null && classInfo.getId().equals(student.getClassInfo().getId())) {
-                Double activityScore = activityRecordService.getStudentTotalActivityScore(studentId);
+        long lowActivityCount = 0;
+
+        List<Student> students = studentService.findByClassInfo(classInfo);
+        for (Student student : students) {
+            List<ActivityRecord> records = activityRecordService
+                .findByStudentAndDateRange(student, weekAgo, LocalDate.now());
+            double score = records.stream()
+                .mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0)
+                .sum();
+            if (score < 20) {
+                lowActivityCount++;
                 Map<String, Object> studentInfo = new HashMap<>();
                 studentInfo.put("studentId", student.getId());
                 studentInfo.put("studentName", student.getUser().getName());
                 studentInfo.put("studentNo", student.getStudentNo());
-                studentInfo.put("activityScore", activityScore != null ? activityScore : 0);
+                studentInfo.put("activityScore", score);
                 lowActivityStudents.add(studentInfo);
             }
         }
         dashboard.put("lowActivityStudents", lowActivityStudents);
-        dashboard.put("lowActivityCount", lowActivityStudents.size());
+        dashboard.put("lowActivityCount", lowActivityCount);
         
-        // 7. 未解决预警数量
-        long unresolvedAlerts = alertService.findUnresolvedByClass(classInfo).size();
+       // 未解决预警数量（从 activity_record 计算严重低活跃度）
+        long unresolvedAlerts = lowActivityStudents.size();
         dashboard.put("unresolvedAlerts", unresolvedAlerts);
         
-        // 8. 严重预警学生
-        List<ActivityAlert> criticalAlerts = alertService.findCriticalAlerts();
+        // 严重预警学生（活跃度低于10）
         List<Map<String, Object>> criticalStudents = new ArrayList<>();
-        for (ActivityAlert alert : criticalAlerts) {
-            if (alert.getClassInfo() != null && classInfo.getId().equals(alert.getClassInfo().getId())) {
-                Map<String, Object> studentAlert = new HashMap<>();
-                studentAlert.put("alertId", alert.getId());
-                studentAlert.put("studentId", alert.getStudent().getId());
-                studentAlert.put("studentName", alert.getStudent().getUser().getName());
-                studentAlert.put("alertType", alert.getAlertType());
-                studentAlert.put("alertLevel", alert.getAlertLevel());
-                studentAlert.put("activityScore", alert.getActivityScore());
-                studentAlert.put("threshold", alert.getThreshold());
-                criticalStudents.add(studentAlert);
+        for (Map<String, Object> studentInfo : lowActivityStudents) {
+            double score = (double) studentInfo.get("activityScore");
+            if (score < 10) {
+                studentInfo.put("alertLevel", "CRITICAL");
+                studentInfo.put("alertType", "LOW_ACTIVITY");
+                studentInfo.put("threshold", 10);
+                criticalStudents.add(studentInfo);
             }
         }
         dashboard.put("criticalAlerts", criticalStudents);
         
         // 9. 作业完成情况统计
-        List<Student> students = studentService.findByClassInfo(classInfo);
         long totalHomeworkCount = 0;
         long totalSubmittedCount = 0;
         double totalHomeworkAvgScore = 0;
@@ -244,6 +245,76 @@ public class TeacherDashboardController {
         }
         
         return Result.success(dashboard);
+    }
+
+    /**
+     * 计算高频错题（从 submission 和 homework.knowledgePointIds 计算）
+     */
+    private List<WrongQuestionDTO> calculateTopWrongQuestions(Long classId) {
+        Map<Long, WrongQuestionAggregate> aggregateMap = new HashMap<>();
+        
+        ClassInfo classInfo = classService.getClassById(classId);
+        if (classInfo == null) return new ArrayList<>();
+        
+        List<Student> students = studentService.findByClassInfo(classInfo);
+        Set<Long> studentIds = students.stream().map(Student::getId).collect(Collectors.toSet());
+        
+        // 获取该班级学生选修的课程
+        List<Course> courses = courseRepository.findByStudentId(students.get(0).getId());
+        
+        for (Course course : courses) {
+            List<Homework> homeworks = homeworkRepository.findByCourse(course);
+            for (Homework homework : homeworks) {
+                List<Long> kpIds = homework.getKnowledgePointIds();
+                if (kpIds == null || kpIds.isEmpty()) continue;
+                
+                List<Submission> submissions = submissionRepository.findGradedByHomeworkId(homework.getId());
+                // 只统计该班级的学生
+                submissions = submissions.stream()
+                    .filter(s -> studentIds.contains(s.getStudent().getId()))
+                    .collect(Collectors.toList());
+                
+                if (submissions.isEmpty()) continue;
+                
+                for (Long kpId : kpIds) {
+                    WrongQuestionAggregate agg = aggregateMap.computeIfAbsent(kpId, k -> new WrongQuestionAggregate());
+                    agg.knowledgePointId = kpId;
+                    int errorCount = 0;
+                    for (Submission sub : submissions) {
+                        if (sub.getScore() != null && sub.getScore() < 60) {
+                            errorCount++;
+                        }
+                    }
+                    agg.errorCount += errorCount;
+                    agg.totalStudents += submissions.size();
+                }
+            }
+        }
+
+        List<WrongQuestionDTO> result = new ArrayList<>();
+        for (WrongQuestionAggregate agg : aggregateMap.values()) {
+            double errorRate = agg.totalStudents > 0 ? agg.errorCount * 100.0 / agg.totalStudents : 0;
+            result.add(WrongQuestionDTO.builder()
+                .knowledgePointId(agg.knowledgePointId)
+                .knowledgePointName(getKnowledgePointName(agg.knowledgePointId))
+                .errorCount(agg.errorCount)
+                .totalStudents(agg.totalStudents)
+                .errorRate(BigDecimal.valueOf(Math.round(errorRate * 100) / 100.0))
+                .build());
+        }
+        
+        result.sort((a, b) -> b.getErrorRate().compareTo(a.getErrorRate()));
+        return result;
+    }
+    
+    private String getKnowledgePointName(Long kpId) {
+        return "知识点" + kpId;
+    }
+
+     private static class WrongQuestionAggregate {
+        Long knowledgePointId;
+        int errorCount = 0;
+        int totalStudents = 0;
     }
     
     /**

@@ -70,7 +70,7 @@ public class Homework {
     @Column(columnDefinition = "json")
     private Object knowledgePointsMapping;
 
-    // ========== 普通统计字段 ==========
+    // ========== 普通统计字段（成绩导入时更新） ==========
     @Column(name = "avg_score")
     private BigDecimal avgScore;
 
