@@ -3,9 +3,15 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 @Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class ParseResult {
     private boolean success;                     // 是否解析成功
     private List<Map<String, Object>> data;      // 解析出的数据列表

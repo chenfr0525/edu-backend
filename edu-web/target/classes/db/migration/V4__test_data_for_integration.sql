@@ -24,9 +24,9 @@ INSERT INTO users (username, password, name, role, gender, email, phone, status,
 -- 2. 教师扩展数据
 -- =====================================================
 INSERT INTO teacher (user_id, teacher_no, department, title, office, join_date) VALUES
-(1, 'T20240001', '计算机科学系', '副教授', '信息楼301', '2015-09-01'),
-(2, 'T20240002', '数学系', '讲师', '数学楼205', '2018-09-01'),
-(3, 'T20240003', '计算机科学系', '教授', '信息楼302', '2010-09-01');
+(1, 'T20240001', '计算机学院', '副教授', '信息楼301', '2015-09-01'),
+(2, 'T20240002', '数学学院', '讲师', '数学楼205', '2018-09-01'),
+(3, 'T20240003', '软件学院', '教授', '信息楼302', '2010-09-01');
 
 -- =====================================================
 -- 3. 班级数据
@@ -341,6 +341,17 @@ INSERT INTO Menu (role, name, path, component, icon, children_id, meta) VALUES
 ('TEACHER', '课程分析', 'course-analysis', 'teacher/course-analysis/index.vue', 'Memo', NULL, '{"title":"课程分析"}'),
 ('TEACHER', '活跃度监控', 'activity-monitor', 'teacher/activity-monitor/index.vue', 'Monitor', NULL, '{"title":"活跃度监控"}'),
 ('TEACHER', '个人中心', '/personal-center', 'personal-center/index.vue', 'User', NULL, '{"title":"个人中心"}');
+
+-- 管理眼菜单
+INSERT INTO Menu (role, name, path, component, icon, children_id, meta) VALUES 
+('ADMIN', '教学看板', 'dashboard', 'teacher/dashboard/index.vue', 'Monitor', NULL, '{"title":"控制台"}'),
+('ADMIN', '学生管理', 'user-manage', 'teacher/user-manage/index.vue', 'User', NULL, '{"title":"学生管理"}'),
+('ADMIN', '教师管理', 'teacher-manage', 'teacher/teacher-manage/index.vue', 'User', NULL, '{"title":"教师管理"}'),
+('ADMIN', '作业管理', 'work-manage', 'teacher/work-manage/index.vue', 'MessageBox', NULL, '{"title":"作业管理"}'),
+('ADMIN', '考试管理', 'exam-manage', 'teacher/exam-manage/index.vue', 'Calendar', NULL, '{"title":"考试管理"}'),
+('ADMIN', '课程分析', 'course-analysis', 'teacher/course-analysis/index.vue', 'Memo', NULL, '{"title":"课程分析"}'),
+('ADMIN', '活跃度监控', 'activity-monitor', 'teacher/activity-monitor/index.vue', 'Monitor', NULL, '{"title":"活跃度监控"}'),
+('ADMIN', '个人中心', '/personal-center', 'personal-center/index.vue', 'User', NULL, '{"title":"个人中心"}');
 
 -- =====================================================
 -- 17. AI分析报告表数据 (V4 新增)

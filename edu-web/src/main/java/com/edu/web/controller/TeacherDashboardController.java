@@ -14,7 +14,6 @@ import com.edu.repository.CourseRepository;
 import com.edu.service.ActivityAlertService;
 import com.edu.service.ActivityRecordService;
 import com.edu.service.AiAnalysisReportService;
-import com.edu.service.AiReportGenerationService;
 import com.edu.service.AuthService;
 import com.edu.service.ClassService;
 import com.edu.service.ClassWrongQuestionStatsService;
@@ -63,7 +62,9 @@ public class TeacherDashboardController {
      * GET /api/dashboard/teacher/class/{classId}
      */
     @GetMapping("/class/{classId}")
+    @PreAuthorize("isAuthenticated()")
     public Result<Map<String, Object>> getClassDashboard(@PathVariable Long classId) {
+         User currentUser = authService.getUser();
         Map<String, Object> dashboard = new HashMap<>();
         
         // 1. 班级基本信息
@@ -71,6 +72,15 @@ public class TeacherDashboardController {
         if (classInfo == null) {
             return Result.error("班级不存在");
         }
+
+         // 权限校验：管理员可以看到所有班级，教师只能看到自己教的班级
+    if (!"ADMIN".equals(currentUser.getRole().name())) {
+        List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(currentUser.getId());
+        boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
+        if (!hasAccess) {
+            return Result.error("无权访问该班级数据");
+        }
+    }
 
         Map<String, Object> classInfoMap = new HashMap<>();
         classInfoMap.put("id", classInfo.getId());
@@ -241,12 +251,20 @@ public class TeacherDashboardController {
      * GET /api/dashboard/teacher/class/{classId}/trend
      */
     @GetMapping("/class/{classId}/trend")
+    @PreAuthorize("isAuthenticated()")
     public Result<Map<String, Object>> getClassScoreTrend(@PathVariable Long classId) {
+        User currentUser = authService.getUser();
         ClassInfo classInfo = classService.getClassById(classId);
         if (classInfo == null) {
             return Result.error("班级不存在");
         }
-        
+         if (!"ADMIN".equals(currentUser.getRole().name())) {
+        List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(currentUser.getId());
+        boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
+        if (!hasAccess) {
+            return Result.error("无权访问该班级数据");
+        }
+    }
         List<Exam> exams = examService.findByClassInfo(classInfo);
         
         List<String> examNames = new ArrayList<>();

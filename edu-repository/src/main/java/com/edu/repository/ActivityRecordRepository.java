@@ -27,6 +27,13 @@ public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, 
     @Query("SELECT a FROM ActivityRecord a WHERE a.student.classInfo.id = :classId AND a.activityDate = :date")
     List<ActivityRecord> findByClassIdAndDate(@Param("classId") Long classId, @Param("date") LocalDate date);
     
+    // Repository 方法
+@Query("SELECT a FROM ActivityRecord a WHERE a.student.classInfo.id = :classId AND a.activityDate BETWEEN :start AND :end")
+List<ActivityRecord> findByClassIdAndDateBetween(
+    @Param("classId") Long classId,
+    @Param("start") LocalDateTime start,
+    @Param("end") LocalDateTime end
+);
     // 统计学生活跃度得分 - 修正：使用关联对象
     @Query("SELECT COALESCE(SUM(a.activityScore), 0) FROM ActivityRecord a WHERE a.student.id = :studentId")
     Double getTotalActivityScore(@Param("studentId") Long studentId);

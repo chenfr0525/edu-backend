@@ -1,7 +1,6 @@
 package com.edu.domain.dto;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 import lombok.Data;
 

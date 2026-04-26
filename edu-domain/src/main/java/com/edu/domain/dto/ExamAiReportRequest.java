@@ -1,4 +1,3 @@
-// ExamAiReportRequest.java
 package com.edu.domain.dto;
 
 import lombok.Data;

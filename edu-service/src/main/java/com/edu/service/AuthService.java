@@ -63,7 +63,7 @@ public class AuthService {
             } else {
                 result.put("info", null);
             }
-        } else if (user.getRole() == Role.TEACHER) {
+        } else if (user.getRole() == Role.TEACHER|| user.getRole() == Role.ADMIN) {
             TeacherDTO teacherDTO = teacherRepository.findByUser(user)
                 .map(teacher -> new TeacherDTO(teacher, teacher.getUser()))
                 .orElse(null);
@@ -91,7 +91,7 @@ public class AuthService {
             student.setGrade("大一");
             studentRepository.save(student);
             studentService.setStudentClass(student.getId(), "计算机1班");
-        } else if(user.getRole() == Role.TEACHER) {
+        } else if(user.getRole() == Role.TEACHER|| user.getRole() == Role.ADMIN) {
             Teacher teacher = new Teacher();
             teacher.setUser(savedUser);
              teacher.setTeacherNo(generateTeacherNo());

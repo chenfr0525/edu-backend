@@ -214,7 +214,6 @@ public class HomeworkManageService {
         Homework homework = Homework.builder()
             .name(request.getName())
             .description(request.getDescription())
-            .knowledgePoint(knowledgePoint)
             .course(course)
             .questionCount(request.getQuestionCount() != null ? request.getQuestionCount() : 0)
             .totalScore(request.getTotalScore() != null ? request.getTotalScore() : 100)
@@ -428,13 +427,13 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
     }
     
     // 4. 如果知识点变更
-    if (request.getKnowledgePointId() != null && 
-        (homework.getKnowledgePoint() == null || 
-         !request.getKnowledgePointId().equals(homework.getKnowledgePoint().getId()))) {
-        KnowledgePoint kp = knowledgePointRepository.findById(request.getKnowledgePointId())
-            .orElse(null);
-        homework.setKnowledgePoint(kp);
-    }
+    // if (request.getKnowledgePointId() != null && 
+    //     (homework.getKnowledgePoint() == null || 
+    //      !request.getKnowledgePointId().equals(homework.getKnowledgePoint().getId()))) {
+    //     KnowledgePoint kp = knowledgePointRepository.findById(request.getKnowledgePointId())
+    //         .orElse(null);
+    //     homework.setKnowledgePoint(kp);
+    // }
     
     // 5. 更新基本信息
     homework.setName(request.getName());
@@ -557,7 +556,6 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         Homework homework = Homework.builder()
             .name(name)
             .description(description)
-            .knowledgePoint(knowledgePointRepository.findById(1L).orElse(null))
             .course(course)
             .questionCount(0)
             .totalScore(totalScore)

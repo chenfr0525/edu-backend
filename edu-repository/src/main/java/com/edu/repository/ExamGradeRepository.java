@@ -151,4 +151,10 @@ Long countByExamIdAndScoreGreaterThanEqual(@Param("examId") Long examId,
 @Query("SELECT AVG(eg.score), MAX(eg.score), MIN(eg.score), COUNT(eg) " +
        "FROM ExamGrade eg WHERE eg.exam.id = :examId AND eg.score IS NOT NULL")
 Object[] getScoreStatistics(@Param("examId") Long examId);
+
+/**
+ * 根据课程ID获取平均分
+ */
+@Query("SELECT AVG(eg.score) FROM ExamGrade eg WHERE eg.exam.course.id = :courseId AND eg.score IS NOT NULL")
+Double getStudentAvgScoreByCourse(@Param("courseId") Long courseId);
 }

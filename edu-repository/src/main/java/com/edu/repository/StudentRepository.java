@@ -149,4 +149,10 @@ List<Student> findAllStudents();
  */
 @Query("SELECT s FROM Student s WHERE s.classInfo.id IN :classIds")
 List<Student> findAllByClassIds(@Param("classIds") List<Long> classIds);
+
+/**
+ * 根据课程获取选课学生
+ */
+@Query("SELECT DISTINCT e.student FROM Enrollment e WHERE e.course.id = :courseId")
+List<Student> findByEnrollmentsCourse(@Param("courseId") Long courseId);
 }

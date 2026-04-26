@@ -1,4 +1,3 @@
-// ExamAiAnalysisVO.java
 package com.edu.domain.dto;
 
 import lombok.Builder;

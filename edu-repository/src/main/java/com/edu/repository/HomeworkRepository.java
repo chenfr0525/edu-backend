@@ -24,9 +24,6 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
     List<Homework> findByCourseIn(List<Course> courses);
     
     
-    // 根据知识点查询
-    List<Homework> findByKnowledgePoint(KnowledgePoint knowledgePoint);
-    
     // 根据状态查询
     List<Homework> findByStatus(HomeworkStatus status);
     

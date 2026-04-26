@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
+    
     List<Enrollment> findByStudent(Student student);
     List<Enrollment> findByStudentAndSemester(Student student, Semester semester);
  @Modifying

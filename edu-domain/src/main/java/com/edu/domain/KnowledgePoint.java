@@ -6,6 +6,7 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
 @Table(name = "knowledge_point")
@@ -25,10 +26,12 @@ public class KnowledgePoint {
 
      @ManyToOne
     @JoinColumn(name = "course_id")
+     @JsonIgnore
     private Course course;
 
       @ManyToOne
     @JoinColumn(name = "parent_id")
+     @JsonIgnore
     private KnowledgePoint parent;
 
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
