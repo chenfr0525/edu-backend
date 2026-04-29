@@ -1,10 +1,6 @@
-// ExamManageController.java
 package com.edu.web.controller;
-
 import com.edu.common.PageResult;
 import com.edu.common.Result;
-import com.edu.domain.ClassInfo;
-import com.edu.domain.Course;
 import com.edu.domain.Exam;
 import com.edu.domain.User;
 import com.edu.domain.dto.*;

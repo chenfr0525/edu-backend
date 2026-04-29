@@ -45,23 +45,19 @@ public class StudentHomeworkAnalysisService {
     private final AiAnalysisReportService aiReportService;
     private final DeepSeekService deepSeekService;
     private final KnowledgePointRepository knowledgePointRepository;
-
+    private final UnifiedAiAnalysisService unifiedAiAnalysisService;
     // ==================== 公共方法 ====================
     
     public List<StudentHomeworkDTO> getStudentHomeworkList(Long studentId, Long courseId, String status) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
-        
-        Semester currentSemester = getCurrentSemester();
-        if (currentSemester == null) {
-            return Collections.emptyList();
-        }
+    
         
         List<Homework> homeworks;
         if (courseId != null && courseId > 0) {
             homeworks = homeworkRepository.findByStudentIdAndCourseId(studentId, courseId);
         } else {
-            homeworks = homeworkRepository.findByStudentIdAndSemesterId(studentId, currentSemester.getId());
+            homeworks = homeworkRepository.findByStudentId(studentId);
         }
         
         if (status != null && !status.isEmpty()) {
@@ -115,13 +111,9 @@ public class StudentHomeworkAnalysisService {
         
         List<Submission> gradedSubmissions = submissionRepository.findGradedByStudentId(studentId);
         
-        Semester currentSemester = getCurrentSemester();
         long totalHomework = 0;
-        if (currentSemester != null) {
-            totalHomework = homeworkRepository.findByStudentIdAndSemesterId(studentId, currentSemester.getId()).size();
-        }else{
-            totalHomework = homeworkRepository.findByStudentId(student.getId()).size();
-        }
+       
+        totalHomework = homeworkRepository.findByStudentId(student.getId()).size();
         cards.setTotalCount(totalHomework);
         cards.setCompletedCount((long) gradedSubmissions.size());
         
@@ -211,278 +203,40 @@ public class StudentHomeworkAnalysisService {
         
         return trendData;
     }
-    
-    public Map<String, Object> getStudentOverallAnalysis(Long studentId) {
-        Student student = studentService.findById(studentId)
-                .orElseThrow(() -> new RuntimeException("学生不存在"));
-        
-        AiAnalysisReport cachedReport = aiReportService.findLatestReport("STUDENT", studentId, "HOMEWORK_OVERALL");
-        
-        if (cachedReport != null && cachedReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            log.info("使用缓存的整体作业分析，学生ID: {}", studentId);
-            Map<String, Object> result = new HashMap<>();
-            result.put("summary", cachedReport.getSummary());
-            result.put("suggestions", cachedReport.getSuggestions());
-            result.put("createdAt", cachedReport.getCreatedAt());
-            result.put("fromCache", true);
-            return result;
-        }
 
-        List<Submission> submissions = submissionRepository.findGradedByStudentId(studentId);
-        if (submissions.isEmpty()) {
-            return createEmptyAnalysisResponse();
-        }
-
-        log.info("调用 AI 生成整体作业分析，学生ID: {}", studentId);
-        try {
-            JSONObject dataJson = buildHomeworkOverallAiData(student, submissions);
-            AiSuggestionDTO aiResponse = deepSeekService.analyzeData(dataJson.toJSONString(), "某个学生作业整体分析");
-
-            if (aiResponse != null && aiResponse.getSummary() != null) {
-                saveHomeworkOverallReport(student, submissions, aiResponse);
-                
-                Map<String, Object> result = new HashMap<>();
-                result.put("summary", aiResponse.getSummary());
-                result.put("suggestions", String.join("\n", aiResponse.getSuggestions()));
-                result.put("totalHomework", submissions.size());
-                result.put("avgScore", submissions.stream().mapToDouble(Submission::getScore).average().orElse(0));
-                result.put("fromCache", false);
-                return result;
-            }
-        } catch (Exception e) {
-            log.error("调用 AI 生成整体作业分析失败", e);
-        }
+     /**
+     * 获取或创建作业AI建议（迁移到统一服务）
+     */
+    private AiSuggestionDTO getOrCreateAiSuggestion(Student student, Homework homework) {
+        String reportType = "HOMEWORK_ANALYSIS_" + homework.getId();
         
-        return generateStudentOverallAnalysis(student);
+        return unifiedAiAnalysisService.getOrCreateAnalysis(
+            "STUDENT",
+            student.getId(),
+            reportType,
+            false
+        );
     }
-    
+
+     /**
+     * 刷新AI分析报告
+     */
     public AiSuggestionDTO refreshAiAnalysis(Long studentId, Long homeworkId) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         Homework homework = homeworkRepository.findById(homeworkId)
                 .orElseThrow(() -> new RuntimeException("作业不存在"));
         
-        String cacheKey = "HOMEWORK_" + homeworkId;
-        List<AiAnalysisReport> oldReports = aiReportService.findByTarget("STUDENT", studentId);
-        for (AiAnalysisReport report : oldReports) {
-            if (cacheKey.equals(report.getReportType())) {
-                aiReportService.deleteById(report.getId());
-                log.info("删除旧的 AI 报告，ID: {}", report.getId());
-            }
-        }
+        String reportType = "HOMEWORK_ANALYSIS_" + homework.getId();
         
-        return getOrCreateAiSuggestion(student, homework);
+        return unifiedAiAnalysisService.refreshAnalysis(
+            "STUDENT",
+            student.getId(),
+            reportType
+        );
     }
-    
-    // ==================== AI 相关核心方法 ====================
-    
-    private AiSuggestionDTO getOrCreateAiSuggestion(Student student, Homework homework) {
-        AiSuggestionDTO suggestion = new AiSuggestionDTO();
 
-        Optional<Submission> submission = submissionRepository.findByStudentIdAndHomeworkId(student.getId(), homework.getId());
-        
-        if (!submission.isPresent() || submission.get().getScore() == null) {
-            suggestion.setSummary("作业尚未批改，暂无法生成分析建议");
-            suggestion.setStrengths(Arrays.asList("待批改后查看"));
-            suggestion.setWeaknesses(Arrays.asList("待批改后查看"));
-            suggestion.setSuggestions(Arrays.asList("请耐心等待老师批改"));
-            return suggestion;
-        }
-
-        String cacheKey = "HOMEWORK_" + homework.getId();
-        AiAnalysisReport cached = aiReportService.findLatestReport("STUDENT", student.getId(), cacheKey);
-        
-        if (cached != null && cached.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            log.info("使用缓存的作业AI分析，学生ID: {}, 作业ID: {}", student.getId(), homework.getId());
-            return parseReportToAiSuggestion(cached);
-        }
-        
-        log.info("调用 AI 生成作业分析，学生ID: {}, 作业ID: {}", student.getId(), homework.getId());
-
-        try {
-            Submission sub = submission.get();
-            JSONObject dataJson = buildHomeworkAiData(student, homework, sub);
-            AiSuggestionDTO aiResponse = deepSeekService.analyzeData(dataJson.toJSONString(), "某个学生作业分析");
-
-            if (aiResponse != null && aiResponse.getSummary() != null) {
-                suggestion.setSummary(aiResponse.getSummary());
-                suggestion.setSuggestions(aiResponse.getSuggestions());
-                suggestion.setStrengths(aiResponse.getStrengths() != null ? aiResponse.getStrengths() : extractStrengthsFromSummary(aiResponse.getSummary()));
-                suggestion.setWeaknesses(aiResponse.getWeaknesses() != null ? aiResponse.getWeaknesses() : extractWeaknessesFromSummary(aiResponse.getSummary()));
-                
-                saveHomeworkAiReport(student, homework, sub, aiResponse);
-            } else {
-                suggestion = getFallbackAiSuggestion(sub, homework.getAvgScore());
-            }
-        } catch (Exception e) {
-            log.error("调用 AI 生成作业分析失败，使用降级方案", e);
-            suggestion = getFallbackAiSuggestion(submission.get(), homework.getAvgScore());
-        }   
-        return suggestion;
-    }
-    
-    // ==================== 数据构建方法 ====================
-    
-    private JSONObject buildHomeworkAiData(Student student, Homework homework, Submission submission) {
-        JSONObject data = new JSONObject();
-        data.put("studentName", student.getUser().getName());
-        data.put("homeworkName", homework.getName());
-        data.put("courseName", homework.getCourse().getName());
-        data.put("myScore", submission.getScore());
-        data.put("totalScore", homework.getTotalScore());
-        data.put("classAvgScore", homework.getAvgScore());
-        data.put("isLate", submission.getSubmissionLateMinutes() != null && submission.getSubmissionLateMinutes() > 0);
-        data.put("knowledgePointScores", submission.getKnowledgePointScores());
-        return data;
-    }
-    
-    private JSONObject buildHomeworkOverallAiData(Student student, List<Submission> submissions) {
-        JSONObject data = new JSONObject();
-        data.put("studentName", student.getUser().getName());
-        
-        List<JSONObject> homeworkList = new ArrayList<>();
-        for (Submission sub : submissions) {
-            JSONObject hw = new JSONObject();
-            hw.put("name", sub.getHomework().getName());
-            hw.put("score", sub.getScore());
-            hw.put("classAvg", sub.getHomework().getAvgScore());
-            homeworkList.add(hw);
-        }
-        data.put("homeworks", homeworkList);
-        
-        double avgScore = submissions.stream().mapToDouble(Submission::getScore).average().orElse(0);
-        data.put("avgScore", avgScore);
-        
-        long aboveAvgCount = submissions.stream()
-                .filter(s -> s.getHomework().getAvgScore() != null && 
-                            s.getScore() > s.getHomework().getAvgScore().doubleValue())
-                .count();
-        data.put("aboveAvgCount", aboveAvgCount);
-        
-        long onTimeCount = submissions.stream()
-                .filter(s -> s.getSubmissionLateMinutes() == null || s.getSubmissionLateMinutes() == 0)
-                .count();
-        data.put("onTimeRate", submissions.isEmpty() ? 0 : onTimeCount * 100.0 / submissions.size());
-        
-        return data;
-    }
-    
-    // ==================== 保存到数据库 ====================
-    
-    private void saveHomeworkAiReport(Student student, Homework homework, Submission submission, AiSuggestionDTO aiResponse) {
-        try {
-            Semester currentSemester = getCurrentSemester();
-            String cacheKey = "HOMEWORK_" + homework.getId();
-            
-            JSONObject analysisData = new JSONObject();
-            analysisData.put("homeworkId", homework.getId());
-            analysisData.put("homeworkName", homework.getName());
-            analysisData.put("myScore", submission.getScore());
-            analysisData.put("classAvg", homework.getAvgScore());
-            analysisData.put("knowledgePointScores", submission.getKnowledgePointScores());
-            analysisData.put("aiResponse", aiResponse);
-            analysisData.put("generatedAt", LocalDateTime.now().toString());
-            
-            AiAnalysisReport report = AiAnalysisReport.builder()
-                .targetType("STUDENT")
-                .targetId(student.getId())
-                .semester(currentSemester)
-                .reportType(cacheKey)
-                .analysisData(analysisData.toJSONString())
-                .summary(aiResponse.getSummary())
-                .suggestions(String.join("\n", aiResponse.getSuggestions()))
-                .createdAt(LocalDateTime.now())
-                .build();
-            
-            aiReportService.save(report);
-            log.info("保存作业 AI 报告成功，学生ID: {}, 作业ID: {}", student.getId(), homework.getId());
-        } catch (Exception e) {
-            log.error("保存作业 AI 报告失败", e);
-        }
-    }
-    
-    private void saveHomeworkOverallReport(Student student, List<Submission> submissions, AiSuggestionDTO aiResponse) {
-        try {
-            Semester currentSemester = getCurrentSemester();
-            
-            JSONObject analysisData = new JSONObject();
-            analysisData.put("totalHomework", submissions.size());
-            analysisData.put("avgScore", submissions.stream().mapToDouble(Submission::getScore).average().orElse(0));
-            analysisData.put("aiResponse", aiResponse);
-            analysisData.put("generatedAt", LocalDateTime.now().toString());
-            
-            AiAnalysisReport report = AiAnalysisReport.builder()
-                .targetType("STUDENT")
-                .targetId(student.getId())
-                .semester(currentSemester)
-                .reportType("HOMEWORK_OVERALL")
-                .analysisData(analysisData.toJSONString())
-                .summary(aiResponse.getSummary())
-                .suggestions(String.join("\n", aiResponse.getSuggestions()))
-                .createdAt(LocalDateTime.now())
-                .build();
-            
-            aiReportService.save(report);
-            log.info("保存整体作业 AI 报告成功，学生ID: {}", student.getId());
-        } catch (Exception e) {
-            log.error("保存整体作业 AI 报告失败", e);
-        }
-    }
-    
-    // ==================== 解析方法 ====================
-    
-    private AiSuggestionDTO parseReportToAiSuggestion(AiAnalysisReport report) {
-        AiSuggestionDTO suggestion = new AiSuggestionDTO();
-        suggestion.setSummary(report.getSummary());
-        
-        List<String> suggestions = new ArrayList<>();
-        if (report.getSuggestions() != null) {
-            suggestions = Arrays.asList(report.getSuggestions().split("\n"));
-        }
-        suggestion.setSuggestions(suggestions);
-        
-        List<String> strengths = extractStrengthsFromSummary(report.getSummary());
-        List<String> weaknesses = extractWeaknessesFromSummary(report.getSummary());
-        
-        suggestion.setStrengths(strengths.isEmpty() ? Arrays.asList("待补充") : strengths);
-        suggestion.setWeaknesses(weaknesses.isEmpty() ? Arrays.asList("待补充") : weaknesses);
-        
-        return suggestion;
-    }
-    
-    private List<String> extractStrengthsFromSummary(String summary) {
-        List<String> strengths = new ArrayList<>();
-        if (summary == null) {
-            strengths.add("暂无数据");
-            return strengths;
-        }
-        if (summary.contains("优秀") || summary.contains("良好") || summary.contains("扎实")) {
-            strengths.add("基础知识掌握较好");
-            strengths.add("学习态度认真");
-        } else if (summary.contains("进步")) {
-            strengths.add("学习有进步");
-        } else {
-            strengths.add("有提升空间");
-        }
-        return strengths;
-    }
-    
-    private List<String> extractWeaknessesFromSummary(String summary) {
-        List<String> weaknesses = new ArrayList<>();
-        if (summary == null) {
-            weaknesses.add("暂无数据");
-            return weaknesses;
-        }
-        if (summary.contains("薄弱") || summary.contains("不足") || summary.contains("需要加强")) {
-            weaknesses.add("部分知识点掌握不牢固");
-        } else {
-            weaknesses.add("无明显薄弱点");
-        }
-        return weaknesses;
-    }
-    
-    // ==================== 降级方案 ====================
-    
+    //降级方法
     private AiSuggestionDTO getFallbackAiSuggestion(Submission submission, BigDecimal classAvg) {
         AiSuggestionDTO suggestion = new AiSuggestionDTO();
         Double score = submission.getScore();
@@ -520,66 +274,6 @@ public class StudentHomeworkAnalysisService {
         }
         
         return suggestion;
-    }
-    
-    private Map<String, Object> generateStudentOverallAnalysis(Student student) {
-        List<Submission> submissions = submissionRepository.findGradedByStudentId(student.getId());
-        
-        if (submissions.isEmpty()) {
-            return createEmptyAnalysisResponse();
-        }
-        
-        double avgScore = submissions.stream().mapToDouble(Submission::getScore).average().orElse(0);
-        long aboveAvgCount = submissions.stream()
-                .filter(s -> {
-                    BigDecimal classAvg = s.getHomework().getAvgScore();
-                    return classAvg != null && s.getScore() > classAvg.doubleValue();
-                })
-                .count();
-        long onTimeCount = submissions.stream()
-                .filter(s -> s.getSubmissionLateMinutes() == null || s.getSubmissionLateMinutes() == 0)
-                .count();
-        
-        StringBuilder summary = new StringBuilder();
-        summary.append("本学期共完成 ").append(submissions.size()).append(" 次作业，");
-        summary.append("平均分 ").append(String.format("%.1f", avgScore)).append(" 分，");
-        summary.append("按时提交率 ").append(String.format("%.1f", onTimeCount * 100.0 / submissions.size())).append("%，");
-        summary.append("其中 ").append(aboveAvgCount).append(" 次作业高于班级平均水平。");
-        
-        if (avgScore >= 85) {
-            summary.append("整体表现优秀，继续保持！");
-        } else if (avgScore >= 70) {
-            summary.append("整体表现良好，部分知识点可加强。");
-        } else {
-            summary.append("整体有待提升，建议加强课后练习。");
-        }
-        
-        StringBuilder suggestions = new StringBuilder();
-        suggestions.append("1. 针对薄弱知识点进行专项练习\n");
-        suggestions.append("2. 按时提交作业，避免迟交影响平时成绩\n");
-        suggestions.append("3. 多参考优秀作业，学习解题思路\n");
-        
-        if (avgScore < 70) {
-            suggestions.append("4. 建议每周至少复习3次，每次1小时\n");
-        }
-        
-        Map<String, Object> result = new HashMap<>();
-        result.put("summary", summary.toString());
-        result.put("suggestions", suggestions.toString());
-        result.put("totalHomework", submissions.size());
-        result.put("avgScore", avgScore);
-        result.put("onTimeRate", onTimeCount * 100.0 / submissions.size());
-        
-        return result;
-    }
-    
-    private Map<String, Object> createEmptyAnalysisResponse() {
-        Map<String, Object> result = new HashMap<>();
-        result.put("summary", "暂无作业数据，无法生成分析报告");
-        result.put("suggestions", "请先完成并提交作业");
-        result.put("totalHomework", 0);
-        result.put("avgScore", 0);
-        return result;
     }
     
     // ==================== 辅助方法 ====================
@@ -848,13 +542,5 @@ public class StudentHomeworkAnalysisService {
             return knowledgePoint.get().getName();
         }
         return "知识点" + kpId;
-    }
-    
-    private Semester getCurrentSemester() {
-        List<Semester> semesters = semesterService.findAll();
-        return semesters.stream()
-                .filter(Semester::getIsCurrent)
-                .findFirst()
-                .orElse(null);
     }
 }

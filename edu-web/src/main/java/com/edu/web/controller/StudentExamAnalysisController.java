@@ -2,20 +2,13 @@ package com.edu.web.controller;
 
 import com.edu.common.PageResult;
 import com.edu.common.Result;
-import com.edu.domain.*;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.ExamStatisticsCards;
 import com.edu.domain.dto.ExamTrendData;
 import com.edu.domain.dto.StudentExamDTO;
 import com.edu.domain.dto.StudentExamDetailDTO;
-import com.edu.service.CourseService;
-import com.edu.service.ScorePredictionService;
 import com.edu.service.StudentExamAnalysisService;
-import com.edu.service.StudentService;
 import lombok.RequiredArgsConstructor;
-
-import java.util.List;
-import java.util.Map;
 
 import org.springframework.web.bind.annotation.*;
 
@@ -79,36 +72,16 @@ public class StudentExamAnalysisController {
         return Result.success(trendData);
     }
 
-    /**
-     * 5. 获取学生整体考试AI分析报告
-     * GET /api/analysis/student/exam/overall-analysis/{studentId}
-     */
-    @GetMapping("/overall-analysis/{studentId}")
-    public Result<Map<String, Object>> getOverallAnalysis(@PathVariable Long studentId) {
-        Map<String, Object> analysis = analysisService.getStudentExamOverallAnalysis(studentId);
-        return Result.success(analysis);
-    }
-
-    /**
-     * 6. 获取即将到来的考试提醒
-     * GET /api/analysis/student/exam/upcoming/{studentId}
-     */
-    @GetMapping("/upcoming/{studentId}")
-    public Result<List<Map<String, Object>>> getUpcomingExams(@PathVariable Long studentId) {
-        List<Map<String, Object>> upcomingExams = analysisService.getUpcomingExams(studentId);
-        return Result.success(upcomingExams);
-    }
-
-    /**
- * 7. 手动刷新 AI 分析报告
- * POST /api/analysis/student/exam/refresh/{studentId}/{examId}
- */
-@PostMapping("/refresh/{studentId}/{examId}")
-public Result<AiSuggestionDTO> refreshAiAnalysis(
-        @PathVariable Long studentId,
-        @PathVariable Long examId) {
-    
-    AiSuggestionDTO suggestion = analysisService.refreshExamAiAnalysis(studentId, examId);
-    return Result.success(suggestion);
-}
+        /**
+         * 7. 手动刷新 AI 分析报告
+         * POST /api/analysis/student/exam/refresh/{studentId}/{examId}
+         */
+        @PostMapping("/refresh/{studentId}/{examId}")
+        public Result<AiSuggestionDTO> refreshAiAnalysis(
+                @PathVariable Long studentId,
+                @PathVariable Long examId) {
+            
+            AiSuggestionDTO suggestion = analysisService.refreshExamAiAnalysis(studentId, examId);
+            return Result.success(suggestion);
+        }
 }

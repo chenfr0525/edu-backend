@@ -43,8 +43,6 @@ import com.edu.domain.dto.StudentExamDetailDTO;
 import com.edu.repository.ExamGradeRepository;
 import com.edu.repository.ExamRepository;
 import com.edu.repository.KnowledgePointRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 @RequiredArgsConstructor
@@ -54,11 +52,42 @@ public class StudentExamAnalysisService {
     private final ExamGradeRepository examGradeRepository;
     private final StudentService studentService;
     private final CourseService courseService;
-    private final SemesterService semesterService;
-    private final AiAnalysisReportService aiReportService;
-    private final DeepSeekService deepSeekService;  // 新增注入
-    private final ObjectMapper objectMapper;
     private final KnowledgePointRepository knowledgePointRepository;
+    private final UnifiedAiAnalysisService unifiedAiAnalysisService;
+
+     /**
+     * 获取或创建考试AI建议（迁移到统一服务）
+     */
+    private AiSuggestionDTO getOrCreateExamAiSuggestionV2(Student student, Exam exam) {
+        // 委托给统一AI服务
+        // 使用 "STUDENT" 作为 targetType
+        // 使用 "EXAM_ANALYSIS_" + exam.getId() 作为 reportType 来区分不同考试
+        String reportType = "EXAM_ANALYSIS_" + exam.getId();
+        
+        return unifiedAiAnalysisService.getOrCreateAnalysis(
+            "STUDENT",
+            student.getId(),
+            reportType,
+            false  // 不强制刷新
+        );
+    }
+
+     // 刷新方法也要改
+    public AiSuggestionDTO refreshExamAiAnalysis(Long studentId, Long examId) {
+        Student student = studentService.findById(studentId)
+                .orElseThrow(() -> new RuntimeException("学生不存在"));
+        Exam exam = examRepository.findById(examId)
+                .orElseThrow(() -> new RuntimeException("考试不存在"));
+        
+        String reportType = "EXAM_ANALYSIS_" + exam.getId();
+        
+        // 强制刷新
+        return unifiedAiAnalysisService.refreshAnalysis(
+            "STUDENT",
+            student.getId(),
+            reportType
+        );
+    }
 
     /**
      * 1. 获取学生的考试列表（分页）- 保持不变
@@ -121,10 +150,6 @@ public class StudentExamAnalysisService {
         detail.setClassStats(getExamClassStatistics(exam));
         detail.setKnowledgePointAnalysis(getExamKnowledgePointAnalysis(studentId, exam));
         detail.setScoreAnalysis(getExamScoreAnalysis(studentId, exam));
-        
-        // AI个性化建议 - 使用新的AI方法
-        detail.setAiSuggestion(getOrCreateExamAiSuggestionV2(student, exam));
-        
         return detail;
     }
     
@@ -235,339 +260,9 @@ public class StudentExamAnalysisService {
         
         return trendData;
     }
-    
-    /**
-     * 5. 获取学生整体考试AI分析报告 - 修改：增加AI调用
-     */
-    public Map<String, Object> getStudentExamOverallAnalysis(Long studentId) {
-        Student student = studentService.findById(studentId)
-                .orElseThrow(() -> new RuntimeException("学生不存在"));
-        
-        // 尝试从缓存获取（7天内有效）
-        AiAnalysisReport cachedReport = aiReportService.findLatestReport("STUDENT", studentId, "EXAM_OVERALL");
-        
-        if (cachedReport != null && cachedReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            log.info("使用缓存的整体考试分析，学生ID: {}", studentId);
-            Map<String, Object> result = new HashMap<>();
-            result.put("summary", cachedReport.getSummary());
-            result.put("suggestions", cachedReport.getSuggestions());
-            result.put("createdAt", cachedReport.getCreatedAt());
-            result.put("fromCache", true);
-            return result;
-        }
-        
-        // 收集数据
-        List<ExamGrade> examGrades = examGradeRepository.findAllByStudentIdOrderByDateAsc(studentId);
-        
-        if (examGrades.isEmpty()) {
-            return createEmptyExamAnalysisResponse();
-        }
-        
-        log.info("调用 AI 生成整体考试分析，学生ID: {}", studentId);
-        
-        try {
-            JSONObject dataJson = buildExamOverallAiData(student, examGrades);
-            AiSuggestionDTO aiResponse = deepSeekService.analyzeData(dataJson.toJSONString(), "学生考试整体分析");
+   
 
-            if (aiResponse != null && aiResponse.getSummary() != null) {
-                // 保存到数据库
-                saveExamOverallReport(student, examGrades, aiResponse);
-                
-                Map<String, Object> result = new HashMap<>();
-                result.put("summary", aiResponse.getSummary());
-                result.put("suggestions", String.join("\n", aiResponse.getSuggestions()));
-                result.put("totalExams", examGrades.size());
-                result.put("avgScore", examGrades.stream().mapToInt(ExamGrade::getScore).average().orElse(0));
-                result.put("fromCache", false);
-                return result;
-            }
-        } catch (Exception e) {
-            log.error("调用 AI 生成整体考试分析失败", e);
-        }
-        
-        // 降级方案
-        return generateExamOverallAnalysis(student);
-    }
-    
-    /**
-     * 6. 获取即将到来的考试提醒 - 保持不变
-     */
-    public List<Map<String, Object>> getUpcomingExams(Long studentId) {
-        List<Exam> upcomingExams = examRepository.findUpcomingByStudentId(studentId);
-        
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (Exam exam : upcomingExams) {
-            Map<String, Object> examInfo = new HashMap<>();
-            examInfo.put("examId", exam.getId());
-            examInfo.put("examName", exam.getName());
-            examInfo.put("examDate", exam.getExamDate());
-            examInfo.put("courseName", exam.getCourse().getName());
-            examInfo.put("location", exam.getLocation());
-            
-            long daysLeft = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), exam.getExamDate());
-            examInfo.put("daysLeft", daysLeft);
-            examInfo.put("urgent", daysLeft <= 3);
-            
-            result.add(examInfo);
-        }
-        return result;
-    }
-    
-    /**
-     * 7. 手动刷新 AI 分析报告（新增）
-     */
-    public AiSuggestionDTO refreshExamAiAnalysis(Long studentId, Long examId) {
-        Student student = studentService.findById(studentId)
-                .orElseThrow(() -> new RuntimeException("学生不存在"));
-        Exam exam = examRepository.findById(examId)
-                .orElseThrow(() -> new RuntimeException("考试不存在"));
-        
-        // 删除旧的缓存报告
-        String cacheKey = "EXAM_" + examId;
-        List<AiAnalysisReport> oldReports = aiReportService.findByTarget("STUDENT", studentId);
-        for (AiAnalysisReport report : oldReports) {
-            if (cacheKey.equals(report.getReportType())) {
-                aiReportService.deleteById(report.getId());
-                log.info("删除旧的 AI 报告，ID: {}", report.getId());
-            }
-        }
-        
-        // 强制重新生成
-        return getOrCreateExamAiSuggestionV2(student, exam);
-    }
-    
-    // ==================== AI 相关核心方法 ====================
-    
-    /**
-     * 获取或创建考试 AI 建议（带缓存）- V2版本
-     */
-    private AiSuggestionDTO getOrCreateExamAiSuggestionV2(Student student, Exam exam) {
-        AiSuggestionDTO suggestion = new AiSuggestionDTO();
-
-        Optional<ExamGrade> grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), student.getId());
-        
-        if (!grade.isPresent() || grade.get().getScore() == null) {
-            suggestion.setSummary("考试尚未出成绩，暂无法生成分析建议");
-            suggestion.setStrengths(Arrays.asList("待出成绩后查看"));
-            suggestion.setWeaknesses(Arrays.asList("待出成绩后查看"));
-            suggestion.setSuggestions(Arrays.asList("请耐心等待成绩公布"));
-            return suggestion;
-        }
-
-        // 检查缓存（7天内有效）
-        String cacheKey = "EXAM_" + exam.getId();
-        AiAnalysisReport cached = aiReportService.findLatestReport("STUDENT", student.getId(), cacheKey);
-        
-        if (cached != null && cached.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            log.info("使用缓存的考试AI分析，学生ID: {}, 考试ID: {}, 创建时间: {}", 
-                student.getId(), exam.getId(), cached.getCreatedAt());
-            return parseExamReportToAiSuggestion(cached);
-        }
-        
-        log.info("调用 AI 生成考试分析，学生ID: {}, 考试ID: {}", student.getId(), exam.getId());
-
-        try {
-            ExamGrade g = grade.get();
-            JSONObject dataJson = buildExamAiData(student, exam, g);
-            AiSuggestionDTO aiResponse = deepSeekService.analyzeData(dataJson.toJSONString(), "考试成绩分析");
-
-            if (aiResponse != null && aiResponse.getSummary() != null) {
-                suggestion.setSummary(aiResponse.getSummary());
-                suggestion.setSuggestions(aiResponse.getSuggestions());
-                suggestion.setStrengths(aiResponse.getStrengths() != null ? aiResponse.getStrengths() : extractStrengthsFromSummary(aiResponse.getSummary()));
-                suggestion.setWeaknesses(aiResponse.getWeaknesses() != null ? aiResponse.getWeaknesses() : extractWeaknessesFromSummary(aiResponse.getSummary()));
-                
-                saveExamAiReport(student, exam, g, aiResponse);
-            } else {
-                suggestion = getExamFallbackAiSuggestion(g, exam.getClassAvgScore());
-            }
-        } catch (Exception e) {
-            log.error("调用 AI 生成考试分析失败，使用降级方案", e);
-            suggestion = getExamFallbackAiSuggestion(grade.get(), exam.getClassAvgScore());
-        }   
-        return suggestion;
-    }
-    
-    // ==================== 数据构建方法 ====================
-    
-    /**
-     * 构建单次考试的 AI 请求数据
-     */
-    private JSONObject buildExamAiData(Student student, Exam exam, ExamGrade grade) {
-        JSONObject data = new JSONObject();
-        data.put("studentName", student.getUser().getName());
-        data.put("examName", exam.getName());
-        data.put("courseName", exam.getCourse().getName());
-        data.put("myScore", grade.getScore());
-        data.put("fullScore", exam.getFullScore());
-        data.put("classAvgScore", exam.getClassAvgScore());
-        data.put("classRank", grade.getClassRank());
-        data.put("scoreTrend", grade.getScoreTrend());
-        data.put("knowledgePointScores", grade.getKnowledgePointScores());
-        return data;
-    }
-    
-    /**
-     * 构建整体考试分析的 AI 请求数据
-     */
-    private JSONObject buildExamOverallAiData(Student student, List<ExamGrade> examGrades) {
-        JSONObject data = new JSONObject();
-        data.put("studentName", student.getUser().getName());
-        
-        List<JSONObject> examList = new ArrayList<>();
-        for (ExamGrade eg : examGrades) {
-            JSONObject exam = new JSONObject();
-            exam.put("name", eg.getExam().getName());
-            exam.put("score", eg.getScore());
-            exam.put("classAvg", eg.getExam().getClassAvgScore());
-            exam.put("rank", eg.getClassRank());
-            examList.add(exam);
-        }
-        data.put("exams", examList);
-        
-        double avgScore = examGrades.stream().mapToInt(ExamGrade::getScore).average().orElse(0);
-        data.put("avgScore", avgScore);
-        
-        long aboveAvgCount = examGrades.stream()
-                .filter(eg -> eg.getExam().getClassAvgScore() != null && 
-                            eg.getScore() > eg.getExam().getClassAvgScore().doubleValue())
-                .count();
-        data.put("aboveAvgCount", aboveAvgCount);
-        
-        long improvingCount = examGrades.stream()
-                .filter(eg -> "UP".equals(eg.getScoreTrend()))
-                .count();
-        data.put("improvingCount", improvingCount);
-        
-        return data;
-    }
-    
-    // ==================== 保存到数据库 ====================
-    
-    /**
-     * 保存单次考试 AI 报告到数据库
-     */
-    private void saveExamAiReport(Student student, Exam exam, ExamGrade grade, AiSuggestionDTO aiResponse) {
-        try {
-            Semester currentSemester = getCurrentSemester();
-            String cacheKey = "EXAM_" + exam.getId();
-            
-            JSONObject analysisData = new JSONObject();
-            analysisData.put("examId", exam.getId());
-            analysisData.put("examName", exam.getName());
-            analysisData.put("myScore", grade.getScore());
-            analysisData.put("classAvg", exam.getClassAvgScore());
-            analysisData.put("classRank", grade.getClassRank());
-            analysisData.put("knowledgePointScores", grade.getKnowledgePointScores());
-            analysisData.put("aiResponse", aiResponse);
-            analysisData.put("generatedAt", LocalDateTime.now().toString());
-            
-            AiAnalysisReport report = AiAnalysisReport.builder()
-                .targetType("STUDENT")
-                .targetId(student.getId())
-                .semester(currentSemester)
-                .reportType(cacheKey)
-                .analysisData(analysisData.toJSONString())
-                .summary(aiResponse.getSummary())
-                .suggestions(String.join("\n", aiResponse.getSuggestions()))
-                .createdAt(LocalDateTime.now())
-                .build();
-            
-            aiReportService.save(report);
-            log.info("保存考试 AI 报告成功，学生ID: {}, 考试ID: {}", student.getId(), exam.getId());
-        } catch (Exception e) {
-            log.error("保存考试 AI 报告失败", e);
-        }
-    }
-    
-    /**
-     * 保存整体考试 AI 报告到数据库
-     */
-    private void saveExamOverallReport(Student student, List<ExamGrade> examGrades, AiSuggestionDTO aiResponse) {
-        try {
-            Semester currentSemester = getCurrentSemester();
-            
-            JSONObject analysisData = new JSONObject();
-            analysisData.put("totalExams", examGrades.size());
-            analysisData.put("avgScore", examGrades.stream().mapToInt(ExamGrade::getScore).average().orElse(0));
-            analysisData.put("aiResponse", aiResponse);
-            analysisData.put("generatedAt", LocalDateTime.now().toString());
-            
-            AiAnalysisReport report = AiAnalysisReport.builder()
-                .targetType("STUDENT")
-                .targetId(student.getId())
-                .semester(currentSemester)
-                .reportType("EXAM_OVERALL")
-                .analysisData(analysisData.toJSONString())
-                .summary(aiResponse.getSummary())
-                .suggestions(String.join("\n", aiResponse.getSuggestions()))
-                .createdAt(LocalDateTime.now())
-                .build();
-            
-            aiReportService.save(report);
-            log.info("保存整体考试 AI 报告成功，学生ID: {}", student.getId());
-        } catch (Exception e) {
-            log.error("保存整体考试 AI 报告失败", e);
-        }
-    }
-    
-    // ==================== 解析方法 ====================
-    
-    /**
-     * 从缓存的 Report 解析为 AiSuggestionDTO
-     */
-    private AiSuggestionDTO parseExamReportToAiSuggestion(AiAnalysisReport report) {
-        AiSuggestionDTO suggestion = new AiSuggestionDTO();
-        suggestion.setSummary(report.getSummary());
-        
-        List<String> suggestions = new ArrayList<>();
-        if (report.getSuggestions() != null) {
-            suggestions = Arrays.asList(report.getSuggestions().split("\n"));
-        }
-        suggestion.setSuggestions(suggestions);
-        
-        List<String> strengths = extractStrengthsFromSummary(report.getSummary());
-        List<String> weaknesses = extractWeaknessesFromSummary(report.getSummary());
-        
-        suggestion.setStrengths(strengths.isEmpty() ? Arrays.asList("待补充") : strengths);
-        suggestion.setWeaknesses(weaknesses.isEmpty() ? Arrays.asList("待补充") : weaknesses);
-        
-        return suggestion;
-    }
-    
-    private List<String> extractStrengthsFromSummary(String summary) {
-        List<String> strengths = new ArrayList<>();
-        if (summary == null) {
-            strengths.add("暂无数据");
-            return strengths;
-        }
-        if (summary.contains("优秀") || summary.contains("良好") || summary.contains("扎实")) {
-            strengths.add("基础知识掌握较好");
-            strengths.add("学习态度认真");
-        } else if (summary.contains("进步")) {
-            strengths.add("学习有进步");
-        } else {
-            strengths.add("有提升空间");
-        }
-        return strengths;
-    }
-    
-    private List<String> extractWeaknessesFromSummary(String summary) {
-        List<String> weaknesses = new ArrayList<>();
-        if (summary == null) {
-            weaknesses.add("暂无数据");
-            return weaknesses;
-        }
-        if (summary.contains("薄弱") || summary.contains("不足") || summary.contains("需要加强")) {
-            weaknesses.add("部分知识点掌握不牢固");
-        } else {
-            weaknesses.add("无明显薄弱点");
-        }
-        return weaknesses;
-    }
-    
     // ==================== 降级方案 ====================
-    
     /**
      * 降级方案：当 AI 调用失败时使用
      */
@@ -608,15 +303,6 @@ public class StudentExamAnalysisService {
         }
         
         return suggestion;
-    }
-    
-    private Map<String, Object> createEmptyExamAnalysisResponse() {
-        Map<String, Object> result = new HashMap<>();
-        result.put("summary", "暂无考试数据，无法生成分析报告");
-        result.put("suggestions", "参加考试后可查看分析");
-        result.put("totalExams", 0);
-        result.put("avgScore", 0);
-        return result;
     }
     
     // ==================== 原有的私有辅助方法（修复错误） ====================
@@ -907,62 +593,5 @@ public class StudentExamAnalysisService {
             return knowledgePoint.get().getName();
         }
         return "知识点" + kpId;
-    }
-    
-    private Semester getCurrentSemester() {
-        List<Semester> semesters = semesterService.findAll();
-        return semesters.stream()
-                .filter(Semester::getIsCurrent)
-                .findFirst()
-                .orElse(null);
-    }
-    
-    private Map<String, Object> generateExamOverallAnalysis(Student student) {
-        List<ExamGrade> examGrades = examGradeRepository.findAllByStudentIdOrderByDateAsc(student.getId());
-        
-        if (examGrades.isEmpty()) {
-            Map<String, Object> analysisData = new HashMap<>();
-            analysisData.put("summary", "暂无考试数据，无法生成分析报告");
-            analysisData.put("suggestions", "参加考试后可查看分析");
-            return analysisData;
-        }
-        
-        double avgScore = examGrades.stream().mapToInt(ExamGrade::getScore).average().orElse(0);
-        long aboveAvgCount = examGradeRepository.countAboveClassAvg(student.getId());
-        long improvingCount = examGrades.stream()
-                .filter(eg -> "UP".equals(eg.getScoreTrend()))
-                .count();
-        
-        StringBuilder summary = new StringBuilder();
-        summary.append("本学期共参加 ").append(examGrades.size()).append(" 次考试，");
-        summary.append("平均分 ").append(String.format("%.1f", avgScore)).append(" 分，");
-        summary.append("其中 ").append(aboveAvgCount).append(" 次考试高于班级平均水平，");
-        summary.append(improvingCount).append(" 次考试成绩呈上升趋势。");
-        
-        if (avgScore >= 85) {
-            summary.append("整体表现优秀，继续保持！");
-        } else if (avgScore >= 70) {
-            summary.append("整体表现良好，部分知识点可加强。");
-        } else {
-            summary.append("整体有待提升，建议加强课后复习。");
-        }
-        
-        StringBuilder suggestions = new StringBuilder();
-        suggestions.append("1. 针对薄弱知识点进行专项练习\n");
-        suggestions.append("2. 考前制定复习计划，合理分配时间\n");
-        suggestions.append("3. 分析错题原因，建立错题本\n");
-        
-        if (avgScore < 70) {
-            suggestions.append("4. 建议每周至少复习3次，每次1小时\n");
-        }
-        
-        Map<String, Object> result = new HashMap<>();
-        result.put("summary", summary.toString());
-        result.put("suggestions", suggestions.toString());
-        result.put("totalExams", examGrades.size());
-        result.put("avgScore", avgScore);
-        result.put("aboveAvgCount", aboveAvgCount);
-        
-        return result;
     }
 }

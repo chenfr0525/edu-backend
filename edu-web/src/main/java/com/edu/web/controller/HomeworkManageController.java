@@ -144,33 +144,19 @@ public class HomeworkManageController {
         homeworkManageService.deleteHomework(homeworkId, currentUser.getId(), currentUser.getRole().name());
         return Result.success(null);
     }
-
-    /**
-     * 10. AI整体分析报告
-     */
-    @GetMapping("/ai-analysis")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<HomeworkAiAnalysisVO> getAiAnalysis(
-            @RequestParam(required = false) Long classId,
-            @RequestParam(required = false) Long courseId) {
-        User currentUser = authService.getUser();
-        return Result.success(homeworkManageService.getOverallAiAnalysis(
-            currentUser.getId(), currentUser.getRole().name(), classId, courseId));
-    }
-
   
-/**
- * 编辑作业
- * PUT /api/homework/update/{homeworkId}
- */
-@PutMapping("/update/{homeworkId}")
-@PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-public Result<Homework> updateHomework(
-        @PathVariable Long homeworkId,
-        @RequestBody HomeworkUpdateRequest request) {
-    User currentUser = authService.getUser();
-    Homework updated = homeworkManageService.updateHomework(
-        homeworkId, request, currentUser.getId(), currentUser.getRole().name());
-    return Result.success(updated);
-}
+        /**
+         * 编辑作业
+         * PUT /api/homework/update/{homeworkId}
+         */
+        @PutMapping("/update/{homeworkId}")
+        @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+        public Result<Homework> updateHomework(
+                @PathVariable Long homeworkId,
+                @RequestBody HomeworkUpdateRequest request) {
+            User currentUser = authService.getUser();
+            Homework updated = homeworkManageService.updateHomework(
+                homeworkId, request, currentUser.getId(), currentUser.getRole().name());
+            return Result.success(updated);
+        }
 }

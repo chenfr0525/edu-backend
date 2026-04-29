@@ -22,24 +22,11 @@ public class AiAnalysisReportController {
         return Result.success(reportService.findAll());
     }
     
-    @GetMapping("/{id}")
-    public Result<AiAnalysisReport> getById(@PathVariable Long id) {
-        return Result.success(reportService.findById(id));
-    }
-    
     @GetMapping("/target")
     public Result<List<AiAnalysisReport>> getByTarget(
             @RequestParam String targetType,
             @RequestParam Long targetId) {
         return Result.success(reportService.findByTarget(targetType, targetId));
-    }
-    
-    @GetMapping("/target/latest")
-    public Result<AiAnalysisReport> getLatestReport(
-            @RequestParam String targetType,
-            @RequestParam Long targetId,
-            @RequestParam String reportType) {
-        return Result.success(reportService.findLatestReport(targetType, targetId, reportType));
     }
     
     @GetMapping("/target/recent")

@@ -53,17 +53,14 @@ public class StudentKnowledgeAnalysisService {
     private final StudentKnowledgeMasteryRepository masteryRepository;
     private final StudentService studentService;
     private final CourseService courseService;
-    private final ClassService classService;
     private final AiAnalysisReportService aiReportService;
-    private final SemesterService semesterService;
     private final ErrorRecordRepository errorRecordRepository;
-    private final DeepSeekService deepSeekService;  // 新增注入
+    private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
     /**
-     * 1. 获取知识点树形结构（按课程分组）- 保持不变
+     * 1. 获取知识点树形结构（按课程分组)
      */
     public List<KnowledgePointTreeDTO> getKnowledgePointTree(Long studentId, Long courseId) {
-        // ... 保持不变 ...
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
@@ -86,10 +83,9 @@ public class StudentKnowledgeAnalysisService {
     }
     
     /**
-     * 2. 获取知识点统计卡片 - 保持不变
+     * 2. 获取知识点统计卡片
      */
     public KnowledgePointStatisticsCardsDTO getStatisticsCards(Long studentId) {
-        // ... 保持不变 ...
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
@@ -156,10 +152,10 @@ public class StudentKnowledgeAnalysisService {
     }
     
     /**
-     * 3. 获取知识点掌握进度（环图数据）- 保持不变
+     * 3. 获取知识点掌握进度（环图数据）
      */
     public KnowledgePointProgressDTO getKnowledgePointProgress(Long studentId, Long courseId) {
-        // ... 保持不变 ...
+       
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
@@ -232,7 +228,7 @@ public class StudentKnowledgeAnalysisService {
     }
     
    /**
- * 4. 获取知识点雷达图数据 - 修改班级平均掌握度计算方式
+ * 4. 获取知识点雷达图数据
  */
 public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long courseId) {
     Student student = studentService.findById(studentId)
@@ -287,11 +283,11 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
     }
     
     /**
-     * 5. 获取知识点详情（包含趋势图）- 保持不变
+     * 5. 获取知识点详情（包含趋势图)
      */
     @Transactional
     public KnowledgePointDetailDTO getKnowledgePointDetail(Long studentId, Long knowledgePointId) {
-        // ... 保持不变 ...
+        
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
@@ -334,173 +330,44 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
     }
     
     /**
-     * 6. 获取知识点AI分析（按课程）- 修改：增加AI调用
+     * 获取知识点AI分析（迁移到统一服务）
+     * @param studentId 学生ID
+     * @param courseId 课程ID（可为null，表示所有课程）
      */
     public AiSuggestionDTO getKnowledgePointAiAnalysis(Long studentId, Long courseId) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
-        String cacheKey = courseId != null ? "KNOWLEDGE_COURSE_" + courseId : "KNOWLEDGE_OVERALL";
+        // 根据是否有courseId区分报告类型
+        String reportType = (courseId != null) 
+            ? "KNOWLEDGE_ANALYSIS_COURSE_" + courseId 
+            : "KNOWLEDGE_ANALYSIS";
         
-        // 尝试从缓存获取（7天内有效）
-        AiAnalysisReport cachedReport = aiReportService.findLatestReport("STUDENT", studentId, cacheKey);
-        
-        if (cachedReport != null && cachedReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            log.info("使用缓存的知识点AI分析，学生ID: {}, cacheKey: {}", studentId, cacheKey);
-            return parseKnowledgeAiAnalysisFromReport(cachedReport);
-        }
-        
-        // 收集数据
-        List<StudentKnowledgeMastery> masteries;
-        if (courseId != null && courseId > 0) {
-            masteries = masteryRepository.findByStudentIdAndCourseId(studentId, courseId);
-        } else {
-            masteries = masteryRepository.findAllByStudentId(studentId);
-        }
-        
-        if (masteries.isEmpty()) {
-            return createEmptyKnowledgeAiResponse();
-        }
-        
-        log.info("调用 AI 生成知识点分析，学生ID: {}, 课程ID: {}", studentId, courseId);
-        
-        try {
-            JSONObject dataJson = buildKnowledgeAiData(student, courseId, masteries);
-            AiSuggestionDTO aiResponse = deepSeekService.analyzeData(dataJson.toJSONString(), "学生知识点掌握分析");
-
-            if (aiResponse != null && aiResponse.getSummary() != null) {
-                // 保存到数据库
-                saveKnowledgeAiReport(student, courseId, masteries, aiResponse, cacheKey);
-                return aiResponse;
-            }
-        } catch (Exception e) {
-            log.error("调用 AI 生成知识点分析失败", e);
-        }
-        
-        // 降级方案
-        return generateFallbackKnowledgeAiAnalysis(student, courseId, masteries);
+        return unifiedAiAnalysisService.getOrCreateAnalysis(
+            "STUDENT",
+            student.getId(),
+            reportType,
+            false
+        );
     }
-    
-    /**
-     * 7. 手动刷新 AI 分析报告（新增）
+   /**
+     * 手动刷新知识点AI分析
      */
     public AiSuggestionDTO refreshKnowledgeAiAnalysis(Long studentId, Long courseId) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
-        String cacheKey = courseId != null ? "KNOWLEDGE_COURSE_" + courseId : "KNOWLEDGE_OVERALL";
+        String reportType = (courseId != null) 
+            ? "KNOWLEDGE_ANALYSIS_COURSE_" + courseId 
+            : "KNOWLEDGE_ANALYSIS";
         
-        // 删除旧的缓存报告
-        List<AiAnalysisReport> oldReports = aiReportService.findByTarget("STUDENT", studentId);
-        for (AiAnalysisReport report : oldReports) {
-            if (cacheKey.equals(report.getReportType())) {
-                aiReportService.deleteById(report.getId());
-                log.info("删除旧的知识点 AI 报告，ID: {}", report.getId());
-            }
-        }
-        
-        // 强制重新生成
-        return getKnowledgePointAiAnalysis(studentId, courseId);
+        return unifiedAiAnalysisService.refreshAnalysis(
+            "STUDENT",
+            student.getId(),
+            reportType
+        );
     }
-    
-    // ==================== AI 相关核心方法 ====================
-    
-    /**
-     * 构建知识点 AI 请求数据
-     */
-    private JSONObject buildKnowledgeAiData(Student student, Long courseId, List<StudentKnowledgeMastery> masteries) {
-        JSONObject data = new JSONObject();
-        data.put("studentName", student.getUser().getName());
-        
-        if (courseId != null && courseId > 0) {
-            Course course = courseService.findById(courseId).orElse(null);
-            data.put("courseName", course != null ? course.getName() : "未知课程");
-        } else {
-            data.put("scope", "全部课程");
-        }
-        
-        List<JSONObject> kpList = new ArrayList<>();
-        for (StudentKnowledgeMastery m : masteries) {
-            JSONObject kp = new JSONObject();
-            kp.put("name", m.getKnowledgePoint().getName());
-            kp.put("masteryLevel", m.getMasteryLevel());
-            kp.put("weaknessLevel", m.getWeaknessLevel());
-            kpList.add(kp);
-        }
-        data.put("knowledgePoints", kpList);
-        
-        double avgMastery = masteries.stream()
-                .mapToDouble(StudentKnowledgeMastery::getMasteryLevel)
-                .average()
-                .orElse(0);
-        data.put("avgMastery", avgMastery);
-        
-        long weakCount = masteries.stream().filter(m -> m.getMasteryLevel() < 60).count();
-        long strongCount = masteries.stream().filter(m -> m.getMasteryLevel() >= 80).count();
-        data.put("weakCount", weakCount);
-        data.put("strongCount", strongCount);
-        
-        return data;
-    }
-    
-    /**
-     * 保存知识点 AI 报告到数据库
-     */
-    private void saveKnowledgeAiReport(Student student, Long courseId, List<StudentKnowledgeMastery> masteries,
-                                        AiSuggestionDTO aiResponse, String cacheKey) {
-        try {
-            Semester currentSemester = getCurrentSemester();
-            
-            JSONObject analysisData = new JSONObject();
-            analysisData.put("courseId", courseId);
-            analysisData.put("totalKnowledgePoints", masteries.size());
-            analysisData.put("avgMastery", masteries.stream().mapToDouble(StudentKnowledgeMastery::getMasteryLevel).average().orElse(0));
-            analysisData.put("aiResponse", aiResponse);
-            analysisData.put("generatedAt", LocalDateTime.now().toString());
-            
-            AiAnalysisReport report = AiAnalysisReport.builder()
-                .targetType("STUDENT")
-                .targetId(student.getId())
-                .semester(currentSemester)
-                .reportType(cacheKey)
-                .analysisData(analysisData.toJSONString())
-                .summary(aiResponse.getSummary())
-                .suggestions(String.join("\n", aiResponse.getSuggestions()))
-                .createdAt(LocalDateTime.now())
-                .build();
-            
-            aiReportService.save(report);
-            log.info("保存知识点 AI 报告成功，学生ID: {}, cacheKey: {}", student.getId(), cacheKey);
-        } catch (Exception e) {
-            log.error("保存知识点 AI 报告失败", e);
-        }
-    }
-    
-    /**
-     * 从缓存报告解析 AI 分析
-     */
-    private AiSuggestionDTO parseKnowledgeAiAnalysisFromReport(AiAnalysisReport report) {
-        AiSuggestionDTO analysis = new AiSuggestionDTO();
-        analysis.setSummary(report.getSummary());
-        
-        List<String> suggestions = new ArrayList<>();
-        if (report.getSuggestions() != null) {
-            suggestions = Arrays.asList(report.getSuggestions().split("\n"));
-        }
-        analysis.setSuggestions(suggestions);
-        
-        // 从 summary 中提取强弱项
-        String summary = report.getSummary();
-        List<String> strengths = extractStrengthsFromSummary(summary);
-        List<String> weaknesses = extractWeaknessesFromSummary(summary);
-        
-        analysis.setStrengths(strengths.isEmpty() ? Arrays.asList("待补充") : strengths);
-        analysis.setWeaknesses(weaknesses.isEmpty() ? Arrays.asList("待补充") : weaknesses);
-        
-        return analysis;
-    }
-    
-    /**
+     /**
      * 降级方案：当 AI 调用失败时使用
      */
     private AiSuggestionDTO generateFallbackKnowledgeAiAnalysis(Student student, Long courseId, List<StudentKnowledgeMastery> masteries) {
@@ -561,6 +428,7 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
         return analysis;
     }
     
+    //空数据时调用
     private AiSuggestionDTO createEmptyKnowledgeAiResponse() {
         AiSuggestionDTO analysis = new AiSuggestionDTO();
         analysis.setSummary("暂无知识点掌握数据，无法生成分析报告");
@@ -570,41 +438,7 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
         return analysis;
     }
     
-    private List<String> extractStrengthsFromSummary(String summary) {
-        List<String> strengths = new ArrayList<>();
-        if (summary == null) {
-            strengths.add("暂无数据");
-            return strengths;
-        }
-        if (summary.contains("优秀") || summary.contains("良好") || summary.contains("扎实")) {
-            strengths.add("基础知识掌握较好");
-            strengths.add("学习态度认真");
-        } else if (summary.contains("进步")) {
-            strengths.add("学习有进步");
-        } else {
-            strengths.add("有提升空间");
-        }
-        return strengths;
-    }
-    
-    private List<String> extractWeaknessesFromSummary(String summary) {
-        List<String> weaknesses = new ArrayList<>();
-        if (summary == null) {
-            weaknesses.add("暂无数据");
-            return weaknesses;
-        }
-        if (summary.contains("薄弱") || summary.contains("不足") || summary.contains("需要加强")) {
-            weaknesses.add("部分知识点掌握不牢固");
-        } else {
-            weaknesses.add("无明显薄弱点");
-        }
-        return weaknesses;
-    }
-    
-    // ==================== 原有的私有辅助方法（保持不变） ====================
-    
     private KnowledgePointTreeDTO buildCourseNode(Student student, Course course) {
-        // ... 保持不变 ...
         KnowledgePointTreeDTO courseNode = new KnowledgePointTreeDTO();
         courseNode.setId(String.valueOf(course.getId()));
         courseNode.setLabel(getCourseIcon(course.getName()) + " " + course.getName());
@@ -637,7 +471,6 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
     }
     
     private KnowledgePointTreeDTO buildKnowledgePointNode(Student student, KnowledgePoint kp) {
-        // ... 保持不变 ...
         KnowledgePointTreeDTO node = new KnowledgePointTreeDTO();
         node.setId(kp.getId().toString());
         node.setLabel(kp.getName());
@@ -730,13 +563,5 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
         if (courseName.contains("Web") || courseName.contains("前端")) return "🌐";
         if (courseName.contains("数据结构")) return "🌲";
         return "📚";
-    }
-    
-    private Semester getCurrentSemester() {
-        List<Semester> semesters = semesterService.findAll();
-        return semesters.stream()
-                .filter(Semester::getIsCurrent)
-                .findFirst()
-                .orElse(null);
     }
 }

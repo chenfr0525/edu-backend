@@ -83,8 +83,8 @@ public class StudentKnowledgeAnalysisController {
         return Result.success(detail);
     }
 
-    /**
-     * 6. 获取知识点AI分析
+   /**
+     * 获取知识点AI分析（使用统一服务）
      * GET /api/analysis/student/knowledge/ai-analysis/{studentId}?courseId=
      */
     @GetMapping("/ai-analysis/{studentId}")
@@ -97,15 +97,15 @@ public class StudentKnowledgeAnalysisController {
     }
 
     /**
- * 7. 手动刷新 AI 分析报告
- * POST /api/analysis/student/knowledge/refresh/{studentId}?courseId=
- */
-@PostMapping("/refresh/{studentId}")
-public Result<AiSuggestionDTO> refreshAiAnalysis(
-        @PathVariable Long studentId,
-        @RequestParam(required = false) Long courseId) {
-    
-    AiSuggestionDTO suggestion = analysisService.refreshKnowledgeAiAnalysis(studentId, courseId);
-    return Result.success(suggestion);
-}
+     * 手动刷新 AI 分析报告
+     * POST /api/analysis/student/knowledge/refresh/{studentId}?courseId=
+     */
+    @PostMapping("/refresh/{studentId}")
+    public Result<AiSuggestionDTO> refreshAiAnalysis(
+            @PathVariable Long studentId,
+            @RequestParam(required = false) Long courseId) {
+        
+        AiSuggestionDTO suggestion = analysisService.refreshKnowledgeAiAnalysis(studentId, courseId);
+        return Result.success(suggestion);
+    }
 }

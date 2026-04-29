@@ -37,10 +37,10 @@ public class CourseAnalysisService {
     private final StudentKnowledgeMasteryRepository masteryRepository;
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
     private final AiAnalysisReportRepository aiReportRepository;
-    private final SemesterRepository semesterRepository;
     private final DeepSeekService deepSeekService;
     private final ObjectMapper objectMapper;
     private final ExamRepository examRepository;
+    private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
     // ==================== 权限辅助方法 ====================
 
@@ -530,9 +530,6 @@ public class CourseAnalysisService {
         // 历史趋势
         List<MasteryTrendVO> masteryTrend = getMasteryTrend(kp);
         
-        // 相关错题
-        List<RelatedWrongQuestionVO> relatedWrongQuestions = getRelatedWrongQuestions(kp);
-        
         // 教学建议
         String teachingSuggestion = generateTeachingSuggestion(stats);
         
@@ -549,7 +546,6 @@ public class CourseAnalysisService {
             .stats(stats)
             .studentMasteryList(studentMasteryList)
             .masteryTrend(masteryTrend)
-            .relatedWrongQuestions(relatedWrongQuestions)
             .teachingSuggestion(teachingSuggestion)
             .build();
     }
@@ -654,15 +650,6 @@ public class CourseAnalysisService {
         }
         
         return trend;
-    }
-
-    private List<RelatedWrongQuestionVO> getRelatedWrongQuestions(KnowledgePoint kp) {
-        List<RelatedWrongQuestionVO> result = new ArrayList<>();
-        
-        // 查询作业中的错题统计
-        // 简化实现，实际需要从class_wrong_question_stats表查询
-        
-        return result;
     }
 
     private String generateTeachingSuggestion(KnowledgePointStatsVO stats) {
@@ -820,9 +807,10 @@ public class CourseAnalysisService {
         return comparison;
     }
 
-    // ==================== 9. AI整体分析报告 ====================
-
-    @Transactional(readOnly = true)
+    /**
+     * AI整体分析报告（迁移到统一服务）
+     */
+    @Transactional(readOnly = false)
     public CourseAiAnalysisVO getAiAnalysis(Long courseId, Long currentUserId, String userRole) {
         List<Long> visibleCourseIds = getVisibleCourseIds(currentUserId, userRole, courseId);
         if (visibleCourseIds.isEmpty()) {
@@ -832,99 +820,32 @@ public class CourseAnalysisService {
         Course course = courseRepository.findById(courseId)
             .orElseThrow(() -> new RuntimeException("课程不存在"));
         
-        // 从ai_analysis_report表获取最新的报告
-        AiAnalysisReport report = aiReportRepository
-            .findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
-                "COURSE", courseId, "COURSE_ANALYSIS");
+        // 使用统一服务
+        AiSuggestionDTO suggestion = unifiedAiAnalysisService.getOrCreateAnalysis(
+            "COURSE",         // targetType: 课程类型
+            courseId,         // targetId: 课程ID
+            "COURSE_ANALYSIS", // reportType: 课程分析
+            false
+        );
         
-        if (report != null && report.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            return convertToAiAnalysisVO(report);
-        }
-        
-        // 生成新的分析报告
-        return generateCourseAiAnalysis(course);
+        // 转换为 CourseAiAnalysisVO
+        return convertToCourseAiAnalysisVO(course, suggestion);
     }
 
-    private CourseAiAnalysisVO generateCourseAiAnalysis(Course course) {
-        CourseStatisticsVO stats = getCourseStatistics(course.getId(), null, "ADMIN");
-        List<KnowledgePoint> kps = knowledgePointRepository.findByCourse(course);
-        
-        // 找出薄弱知识点
-        List<String> weakKps = new ArrayList<>();
-        List<String> strongKps = new ArrayList<>();
-        
-        for (KnowledgePoint kp : kps) {
-            Double avgMastery = masteryRepository.getClassAvgMastery(kp.getId(), null);
-            if (avgMastery != null) {
-                if (avgMastery < 50) weakKps.add(kp.getName());
-                if (avgMastery >= 80) strongKps.add(kp.getName());
-            }
-        }
-        
-        StringBuilder summary = new StringBuilder();
-        summary.append("《").append(course.getName()).append("》课程学情分析报告\n\n");
-        summary.append("该课程共有 ").append(stats.getStudentCount()).append(" 名学生修读，");
-        summary.append("平均分 ").append(stats.getAvgScore()).append(" 分，");
-        summary.append("及格率 ").append(stats.getPassRate()).append("%。\n\n");
-        
-        if (!weakKps.isEmpty()) {
-            summary.append("薄弱知识点：").append(String.join("、", weakKps)).append("\n");
-            summary.append("建议针对这些知识点进行专项强化训练。");
-        } else {
-            summary.append("各知识点掌握情况良好，无显著薄弱环节。");
-        }
-        
-        List<String> suggestions = new ArrayList<>();
-        if (!weakKps.isEmpty()) {
-            suggestions.add("1. 针对薄弱知识点：" + String.join("、", weakKps) + "，安排专题复习课");
-        }
-        suggestions.add("2. 建议增加随堂测验频率，及时了解学生掌握情况");
-        suggestions.add("3. 对成绩较低的学生进行个别辅导");
-        
-        if (stats.getAvgScore().doubleValue() >= 80) {
-            suggestions.add("4. 可适当增加拓展内容，培养优等生");
-        } else if (stats.getAvgScore().doubleValue() < 60) {
-            suggestions.add("4. 建议放慢教学进度，加强基础巩固");
-        }
-        
-        Map<String, Object> analysisData = new HashMap<>();
-        analysisData.put("statistics", stats);
-        analysisData.put("weakKnowledgePoints", weakKps);
-        analysisData.put("strongKnowledgePoints", strongKps);
-        analysisData.put("knowledgePointCount", kps.size());
-        
+    /**
+     * 转换为 CourseAiAnalysisVO
+     */
+    private CourseAiAnalysisVO convertToCourseAiAnalysisVO(Course course, AiSuggestionDTO suggestion) {
         return CourseAiAnalysisVO.builder()
-            .summary(summary.toString())
-            .strengths(strongKps.isEmpty() ? Arrays.asList("整体参与度高") : strongKps)
-            .weaknesses(weakKps.isEmpty() ? Arrays.asList("无明显薄弱点") : weakKps)
-            .suggestions(suggestions)
-            .analysisData(analysisData)
+            .summary(suggestion.getSummary())
+            .strengths(suggestion.getStrengths())
+            .weaknesses(suggestion.getWeaknesses())
+            .suggestions(suggestion.getSuggestions())
+            .analysisData(new HashMap<>())
             .chartsConfig(new HashMap<>())
             .createdAt(LocalDateTime.now())
             .build();
     }
-
-    private CourseAiAnalysisVO convertToAiAnalysisVO(AiAnalysisReport report) {
-        try {
-            Map<String, Object> data = objectMapper.readValue(report.getAnalysisData(), Map.class);
-            return CourseAiAnalysisVO.builder()
-                .summary(report.getSummary())
-                .strengths((List<String>) data.getOrDefault("strengths", new ArrayList<>()))
-                .weaknesses((List<String>) data.getOrDefault("weaknesses", new ArrayList<>()))
-                .suggestions(report.getSuggestions() != null ? 
-                    Arrays.asList(report.getSuggestions().split("\n")) : new ArrayList<>())
-                .analysisData(data)
-                .chartsConfig(report.getChartsConfig() != null ? 
-                    objectMapper.readValue(report.getChartsConfig(), Map.class) : null)
-                .createdAt(report.getCreatedAt())
-                .build();
-        } catch (Exception e) {
-            log.error("转换AI报告失败", e);
-            return null;
-        }
-    }
-
-    // ==================== 辅助方法 ====================
 
     private String getCourseStatusText(CourseStatus status) {
         Map<String, String> statusMap = new HashMap<>();

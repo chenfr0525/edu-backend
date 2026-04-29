@@ -4,6 +4,7 @@ import com.edu.common.Result;
 import com.edu.domain.*;
 import com.edu.domain.dto.ActivityMonitorDTO;
 import com.edu.domain.dto.AiAnalysisReportDTO;
+import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.ClassScoreDistributionDTO;
 import com.edu.domain.dto.DashboardStatsDTO;
 import com.edu.domain.dto.TeachingDashboardDataDTO;
@@ -13,26 +14,23 @@ import com.edu.repository.ClassRepository;
 import com.edu.repository.CourseRepository;
 import com.edu.repository.HomeworkRepository;
 import com.edu.repository.SubmissionRepository;
-import com.edu.service.ActivityAlertService;
 import com.edu.service.ActivityRecordService;
-import com.edu.service.AiAnalysisReportService;
 import com.edu.service.AuthService;
 import com.edu.service.ClassService;
-import com.edu.service.ClassWrongQuestionStatsService;
-import com.edu.service.CourseService;
 import com.edu.service.ExamGradeService;
 import com.edu.service.ExamService;
-import com.edu.service.HomeworkService;
 import com.edu.service.StudentKnowledgeMasteryService;
 import com.edu.service.StudentService;
 import com.edu.service.SubmissionService;
 import com.edu.service.TeacherDashboardAiService;
+import com.edu.service.TeacherService;
 import com.edu.service.TeachingDashboardService;
 
 import lombok.RequiredArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -51,7 +49,7 @@ public class TeacherDashboardController {
     private final StudentKnowledgeMasteryService masteryService;
     private final ActivityRecordService activityRecordService;
     private final SubmissionRepository submissionRepository;
-    private final AiAnalysisReportService aiReportService;
+    private final TeacherService teacherService;
     private final SubmissionService submissionService;
      private final TeachingDashboardService dashboardService;
     private final AuthService authService;
@@ -78,7 +76,9 @@ public class TeacherDashboardController {
 
           // 权限校验
         if (!"ADMIN".equals(currentUser.getRole().name())) {
-            List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(currentUser.getId());
+             Long teacherId = teacherService.findByUser(currentUser).orElseThrow(() -> new RuntimeException("Teacher not found"))
+            .getId();
+            List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(teacherId);
             boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
             if (!hasAccess) {
                 return Result.error("无权访问该班级数据");
@@ -234,11 +234,20 @@ public class TeacherDashboardController {
         dashboard.put("classHomeworkStats", classHomeworkStatsMap);
         
         // 10. AI 生成的班级学情总结报告
-        AiAnalysisReport latestReport = aiReportService.findLatestReport("CLASS", classId, "COMPREHENSIVE");
-        if (latestReport != null) {
-            dashboard.put("aiSummary", latestReport.getSummary());
-            dashboard.put("aiSuggestions", latestReport.getSuggestions());
-            dashboard.put("aiReportDate", latestReport.getCreatedAt());
+       AiSuggestionDTO suggestion = null;
+        try {
+            suggestion = teacherDashboardAiService.getOrCreateReport(
+                "CLASS", 
+                classId, 
+                "COMPREHENSIVE"
+            );
+        } catch (Exception e) {
+        }
+
+        if (suggestion != null) {
+            dashboard.put("aiSummary", suggestion.getSummary());
+            dashboard.put("aiSuggestions", String.join("\n", suggestion.getSuggestions()));
+            dashboard.put("aiReportDate", LocalDateTime.now());
         } else {
             dashboard.put("aiSummary", "暂无AI分析报告，请先上传足够的作业和考试数据");
             dashboard.put("aiSuggestions", "建议上传历次考试成绩和作业数据，系统将自动生成学情分析");
@@ -330,7 +339,9 @@ public class TeacherDashboardController {
             return Result.error("班级不存在");
         }
          if (!"ADMIN".equals(currentUser.getRole().name())) {
-        List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(currentUser.getId());
+            Long teacherId = teacherService.findByUser(currentUser).orElseThrow(() -> new RuntimeException("Teacher not found"))
+            .getId();
+        List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(teacherId);
         boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
         if (!hasAccess) {
             return Result.error("无权访问该班级数据");
@@ -720,7 +731,8 @@ public class TeacherDashboardController {
         if ("ADMIN".equals(currentUser.getRole().name())) {
             classes = dashboardService.getAllClasses();
         } else {
-            Long teacherId = currentUser.getId();
+            Long teacherId = teacherService.findByUser(currentUser).orElseThrow(() -> new RuntimeException("Teacher not found"))
+            .getId();
             classes = dashboardService.getTeacherClasses(teacherId);
         }
         
@@ -750,7 +762,8 @@ public class TeacherDashboardController {
         if ("ADMIN".equals(currentUser.getRole().name())) {
             courses = dashboardService.getAllCourses();
         } else {
-            Long teacherId = currentUser.getId();
+            Long teacherId = teacherService.findByUser(currentUser).orElseThrow(() -> new RuntimeException("Teacher not found"))
+            .getId();
             courses = dashboardService.getTeacherCourses(teacherId);
         }
         
@@ -911,10 +924,14 @@ public Result<AiAnalysisReportDTO> generateAiReport(
     String targetType = classId != null ? "CLASS" : "COURSE";
     Long targetId = classId != null ? classId : courseId;
     
-    // 使用新的 AI 服务（带缓存）
-    AiAnalysisReport report = teacherDashboardAiService.getOrCreateReport(targetType, targetId, reportType);
+    if (targetId == null) {
+        return Result.error("请指定班级ID或课程ID");
+    }
     
-    if (report == null) {
+    // 使用统一AI服务获取 AiSuggestionDTO
+    AiSuggestionDTO suggestion = teacherDashboardAiService.getOrCreateReport(targetType, targetId, reportType);
+    
+     if (suggestion == null) {
         return Result.error("生成 AI 报告失败");
     }
     
@@ -928,15 +945,15 @@ public Result<AiAnalysisReportDTO> generateAiReport(
         if (course != null) targetName = course.getName();
     }
     
+    // 转换为 AiAnalysisReportDTO
     AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
-        .reportId(report.getId())
-        .targetType(report.getTargetType())
-        .targetId(report.getTargetId())
+        .targetType(targetType)
+        .targetId(targetId)
         .targetName(targetName)
-        .reportType(report.getReportType())
-        .summary(report.getSummary())
-        .suggestions(report.getSuggestions())
-        .createdAt(report.getCreatedAt())
+        .reportType(reportType)
+        .summary(suggestion.getSummary())
+        .suggestions(String.join("\n", suggestion.getSuggestions()))
+        .createdAt(LocalDateTime.now())
         .build();
     
     return Result.success(dto);
@@ -954,11 +971,15 @@ public Result<AiAnalysisReportDTO> getLatestAiReport(
     String targetType = classId != null ? "CLASS" : "COURSE";
     Long targetId = classId != null ? classId : courseId;
     
-    // 直接从数据库获取最新的报告（7天内有效）
-    AiAnalysisReport report = teacherDashboardAiService.getOrCreateReport(targetType, targetId, "COMPREHENSIVE");
+    if (targetId == null) {
+        return Result.error("请指定班级ID或课程ID");
+    }
     
-    if (report == null) {
-        return Result.error("暂无AI分析报告");
+    // 使用统一AI服务获取 AiSuggestionDTO
+    AiSuggestionDTO suggestion = teacherDashboardAiService.getOrCreateReport(targetType, targetId, "COMPREHENSIVE");
+    
+    if (suggestion == null) {
+    return Result.error("暂无AI分析报告");
     }
     
     // 获取目标名称
@@ -971,16 +992,16 @@ public Result<AiAnalysisReportDTO> getLatestAiReport(
         if (course != null) targetName = course.getName();
     }
     
+    // 转换为 AiAnalysisReportDTO
     AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
-        .reportId(report.getId())
-        .targetType(report.getTargetType())
-        .targetId(report.getTargetId())
+        .targetType(targetType)
+        .targetId(targetId)
         .targetName(targetName)
-        .reportType(report.getReportType())
-        .summary(report.getSummary())
-        .suggestions(report.getSuggestions())
-        .createdAt(report.getCreatedAt())
-        .build();
+        .reportType("COMPREHENSIVE")
+        .summary(suggestion.getSummary())
+        .suggestions(String.join("\n", suggestion.getSuggestions()))
+            .createdAt(LocalDateTime.now())
+            .build();
     
     return Result.success(dto);
 }
@@ -998,13 +1019,18 @@ public Result<AiAnalysisReportDTO> refreshAiReport(
     String targetType = classId != null ? "CLASS" : "COURSE";
     Long targetId = classId != null ? classId : courseId;
     
-    // 强制刷新
-    AiAnalysisReport report = teacherDashboardAiService.refreshReport(targetType, targetId, reportType);
+    if (targetId == null) {
+        return Result.error("请指定班级ID或课程ID");
+    }
     
-    if (report == null) {
+    // 强制刷新，获取新的 AiSuggestionDTO
+    AiSuggestionDTO suggestion = teacherDashboardAiService.refreshReport(targetType, targetId, reportType);
+    
+    if (suggestion == null) {
         return Result.error("刷新 AI 报告失败");
     }
     
+    // 获取目标名称
     String targetName = "";
     if (classId != null) {
         ClassInfo classInfo = classRepository.findById(classId).orElse(null);
@@ -1014,15 +1040,15 @@ public Result<AiAnalysisReportDTO> refreshAiReport(
         if (course != null) targetName = course.getName();
     }
     
+    // 转换为 AiAnalysisReportDTO
     AiAnalysisReportDTO dto = AiAnalysisReportDTO.builder()
-        .reportId(report.getId())
-        .targetType(report.getTargetType())
-        .targetId(report.getTargetId())
+        .targetType(targetType)
+        .targetId(targetId)
         .targetName(targetName)
-        .reportType(report.getReportType())
-        .summary(report.getSummary())
-        .suggestions(report.getSuggestions())
-        .createdAt(report.getCreatedAt())
+        .reportType(reportType)
+        .summary(suggestion.getSummary())
+        .suggestions(String.join("\n", suggestion.getSuggestions()))
+        .createdAt(LocalDateTime.now())
         .build();
     
     return Result.success(dto);

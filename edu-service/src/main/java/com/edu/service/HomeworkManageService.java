@@ -1,4 +1,3 @@
-// HomeworkManageService.java
 package com.edu.service;
 
 import com.alibaba.fastjson.JSON;
@@ -38,13 +37,10 @@ public class HomeworkManageService {
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
     private final AiAnalysisReportRepository aiReportRepository;
-    private final SemesterRepository semesterRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final DeepSeekService deepSeekService;
-    private final ObjectMapper objectMapper;
     private final ActivitySyncService activitySyncService;
-
-    // ==================== 权限辅助方法 ====================
+     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
     private List<Long> getVisibleClassIds(Long userId, String userRole, Long requestClassId) {
         if ("ADMIN".equals(userRole)) {
@@ -587,11 +583,14 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         return sb.toString();
     }
 
+    /**
+     * 确认导入作业成绩（修改）
+     */
     @Transactional
     public HomeworkGradeImportResultVO confirmHomeworkGradeImport(Long homeworkId, List<Map<String, Object>> data) {
-         List<FieldMapping> mappings= getHomeworkGradeFieldMappings();
+        List<FieldMapping> mappings = getHomeworkGradeFieldMappings();
       
-             List<ValidationError> errors = deepSeekService.validateData(data, mappings);
+        List<ValidationError> errors = deepSeekService.validateData(data, mappings);
         if (!errors.isEmpty()) {
             log.error("数据验证失败：{}", errors);
             return HomeworkGradeImportResultVO.builder()
@@ -601,60 +600,62 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         }
 
            Homework homework = homeworkRepository.findById(homeworkId)
-        .orElseThrow(() -> new RuntimeException("作业不存在"));
+            .orElseThrow(() -> new RuntimeException("作业不存在"));
     
-    int successCount = 0;
-    int failCount = 0;
-    int updateCount = 0;
-    List<Submission> savedSubmissions = new ArrayList<>();
-    StringBuilder resultMsg = new StringBuilder();
+        int successCount = 0;
+        int failCount = 0;
+        int updateCount = 0;
+        List<Submission> savedSubmissions = new ArrayList<>();
+        StringBuilder resultMsg = new StringBuilder();
     
-    for (Map<String, Object> row : data) {
-        try {
-            String studentIdentifier = (String) row.get("studentName");
-            Student student = findStudentByIdentifier(studentIdentifier);
-            if (student == null) {
-                throw new RuntimeException("学生不存在: " + studentIdentifier);
-            }
-            Submission submission = insertOrUpdateSubmission(homework, row, student);
-            savedSubmissions.add(submission);
-            successCount++;
+        for (Map<String, Object> row : data) {
+            try {
+                String studentIdentifier = (String) row.get("studentName");
+                Student student = findStudentByIdentifier(studentIdentifier);
+                if (student == null) {
+                    throw new RuntimeException("学生不存在: " + studentIdentifier);
+                }
+                Submission submission = insertOrUpdateSubmission(homework, row, student);
+                savedSubmissions.add(submission);
+                successCount++;
             if (submission.getId() != null && submissionRepository.findById(submission.getId()).isPresent()) {
-                updateCount++;
+                    updateCount++;
+                }
+                log.info("成功导入成绩 - 学生：{}，成绩：{}", row.get("studentName"), row.get("score"));
+            } catch (Exception e) {
+                failCount++;
+                String errorMsg = String.format("导入失败 - 学生：%s，原因：%s",
+                    row.get("studentName"), e.getMessage());
+                log.error(errorMsg);
+                resultMsg.append(errorMsg).append("\n");
             }
-            log.info("成功导入成绩 - 学生：{}，成绩：{}", row.get("studentName"), row.get("score"));
-        } catch (Exception e) {
-            failCount++;
-            String errorMsg = String.format("导入失败 - 学生：%s，原因：%s",
-                row.get("studentName"), e.getMessage());
-            log.error(errorMsg);
-            resultMsg.append(errorMsg).append("\n");
         }
-    }
     
-    // 更新作业统计
-    updateHomeworkStatistics(homework);
+        // 更新作业统计
+        updateHomeworkStatistics(homework);
 
-    boolean aiCompleted = processHomeworkGradesAndUpdateMastery(homework, savedSubmissions);
+     // 处理作业成绩并更新知识点掌握度（触发AI分析）
+        boolean aiCompleted = processHomeworkGradesAndUpdateMastery(homework, savedSubmissions);
     
-    String summary = String.format("导入完成！成功：%d条（新增%d条，更新%d条），失败：%d条", 
-        successCount, successCount - updateCount, updateCount, failCount);
-    if (failCount > 0) {
-        summary = summary + "\n" + resultMsg.toString();
+        String summary = String.format("导入完成！成功：%d条（新增%d条，更新%d条），失败：%d条", 
+            successCount, successCount - updateCount, updateCount, failCount);
+        if (failCount > 0) {
+            summary = summary + "\n" + resultMsg.toString();
+        }
+        log.info(summary);
+    
+        return HomeworkGradeImportResultVO.builder()
+            .homeworkId(homeworkId)
+            .totalImported(data.size())
+            .successCount(successCount)
+            .updateCount(updateCount)
+            .failCount(failCount)
+            .success(failCount == 0)
+            .message(summary)
+            .aiAnalysisCompleted(aiCompleted)
+            .build();
     }
-    log.info(summary);
-    
-    return HomeworkGradeImportResultVO.builder()
-        .homeworkId(homeworkId)
-        .totalImported(data.size())
-        .successCount(successCount)
-        .updateCount(updateCount)
-        .failCount(failCount)
-        .success(failCount == 0)
-        .message(summary)
-        .aiAnalysisCompleted(aiCompleted)
-        .build();
-}
+
 
    private Submission insertOrUpdateSubmission(Homework homework, Map<String, Object> row, Student student) {
     Double score = ((Number) row.get("score")).doubleValue();
@@ -688,105 +689,57 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
     
     return saved;
 }
-
-private boolean processHomeworkGradesAndUpdateMastery(Homework homework, List<Submission> submissions) {
-    try {
-        // 获取作业关联的知识点ID列表
-        List<Long> knowledgePointIds = homework.getKnowledgePointIds();
-        
-        if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
-            log.warn("作业 {} 未关联知识点，跳过掌握度计算", homework.getId());
-            return false;
-        }
-        
-        // 获取知识点信息
-        List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
-        
-        if (kps.isEmpty()) {
-            log.warn("未找到知识点信息，跳过掌握度计算");
-            return false;
-        }
-
-        // 统计信息用于AI分析
-        List<Double> scores = submissions.stream()
-            .map(Submission::getScore)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
-        
-        double avg = scores.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        long passCount = scores.stream().filter(s -> s >= 60).count();
-        long excellentCount = scores.stream().filter(s -> s >= 80).count();
-        
-        // 构建AI分析数据
-        Map<String, Object> aiAnalysisData = new HashMap<>();
-        List<String> strengths = new ArrayList<>();
-        List<String> weaknesses = new ArrayList<>();
-
-         // ========== 核心：更新学生知识点掌握度 ==========
-        for (Submission submission : submissions) {
-            Student student = submission.getStudent();
-            Double submissionScore = submission.getScore();
+ /**
+     * 处理作业成绩并更新知识点掌握度
+     */
+    private boolean processHomeworkGradesAndUpdateMastery(Homework homework, List<Submission> submissions) {
+        try {
+            // 获取作业关联的知识点ID列表
+            List<Long> knowledgePointIds = homework.getKnowledgePointIds();
             
-            // 计算得分率（满分100分制）
-            double scoreRate = (submissionScore != null && homework.getTotalScore() != null && homework.getTotalScore() > 0)
-                ? submissionScore / homework.getTotalScore() * 100
-                : (submissionScore != null ? submissionScore : 0);
-            
-            for (KnowledgePoint kp : kps) {
-                // 更新 student_knowledge_mastery 表
-                updateStudentMastery(student, kp, scoreRate);
-                
-                // 更新 knowledge_point_score_detail 表
-                saveKnowledgePointScoreDetail(student, kp, "HOMEWORK", homework.getId(), scoreRate);
+            if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
+                log.warn("作业 {} 未关联知识点，跳过掌握度计算", homework.getId());
+                return false;
             }
-        }
 
-          // 分析知识点掌握情况（用于AI报告）
-        List<Map<String, Object>> kpAnalysis = new ArrayList<>();
-        for (KnowledgePoint kp : kps) {
-            Map<String, Object> kpResult = new HashMap<>();
-            kpResult.put("knowledgePointId", kp.getId());
-            kpResult.put("knowledgePointName", kp.getName());
+       List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
+            if (kps.isEmpty()) {
+                log.warn("未找到知识点信息，跳过掌握度计算");
+                return false;
+            }
+
+            // 1. 更新学生知识点掌握度（原有逻辑保留）
+            for (Submission submission : submissions) {
+                Student student = submission.getStudent();
+                Double submissionScore = submission.getScore();
+                
+                double scoreRate = (submissionScore != null && homework.getTotalScore() != null && homework.getTotalScore() > 0)
+                    ? submissionScore / homework.getTotalScore() * 100
+                    : (submissionScore != null ? submissionScore : 0);
+                
+                for (KnowledgePoint kp : kps) {
+                    updateStudentMastery(student, kp, scoreRate);
+                    saveKnowledgePointScoreDetail(student, kp, "HOMEWORK", homework.getId(), scoreRate);
+                }
+            }
+            // 2. 使用统一服务生成AI分析报告（自动保存）
+            AiSuggestionDTO aiResult = unifiedAiAnalysisService.getOrCreateAnalysis(
+                "HOMEWORK",          // targetType: 作业类型
+                homework.getId(),    // targetId: 作业ID
+                "HOMEWORK_ANALYSIS", // reportType: 作业分析
+                true                 // 强制刷新（因为刚导入新数据）
+            );
             
-            // 计算该知识点在本次作业中的平均掌握度
-            double avgRate = calculateAvgMasteryForKnowledgePoint(homework, kp, submissions);
-            kpResult.put("avgScoreRate", Math.round(avgRate * 100) / 100.0);
+            log.info("作业成绩AI分析完成，作业ID: {}, 摘要: {}", homework.getId(), 
+                aiResult != null ? aiResult.getSummary() : "无");
             
-            String level = avgRate >= 70 ? "GOOD" : (avgRate >= 50 ? "MODERATE" : "WEAK");
-            kpResult.put("level", level);
-            kpAnalysis.add(kpResult);
-
-                if (avgRate >= 70) strengths.add(kp.getName());
-            else if (avgRate < 50) weaknesses.add(kp.getName());
+            return true;
+            
+        } catch (Exception e) {
+            log.error("处理作业成绩失败", e);
+            return false;
         }
-        
-        // 生成AI分析摘要和建议
-        String summary = generateHomeworkSummary(homework, avg, passCount, scores.size());
-        String suggestions = generateHomeworkSuggestions(kpAnalysis, avg);
-        
-        Map<String, Object> scoreDistribution = new HashMap<>();
-        scoreDistribution.put("avgScore", avg);
-        scoreDistribution.put("passRate", scores.size() > 0 ? passCount * 100.0 / scores.size() : 0);
-
-        scoreDistribution.put("excellentRate", scores.size() > 0 ? excellentCount * 100.0 / scores.size() : 0);
-        
-        aiAnalysisData.put("summary", summary);
-        aiAnalysisData.put("strengths", strengths);
-        aiAnalysisData.put("weaknesses", weaknesses);
-        aiAnalysisData.put("suggestions", suggestions);
-        aiAnalysisData.put("knowledgePointAnalysis", kpAnalysis);
-        aiAnalysisData.put("scoreDistribution", scoreDistribution);
-        
-        // 保存到 ai_analysis_report 表（不再存到 homework.aiParsedData）
-        saveAiAnalysisReport(homework, "HOMEWORK", summary, suggestions, aiAnalysisData);
-        
-        return true;
-    } catch (Exception e) {
-        log.error("处理作业成绩失败", e);
-        return false;
     }
-}
-
 private void updateStudentMastery(Student student, KnowledgePoint kp, double newScoreRate) {
     Optional<StudentKnowledgeMastery> existing = masteryRepository
         .findByStudentAndKnowledgePoint(student, kp);
@@ -830,33 +783,12 @@ private void saveKnowledgePointScoreDetail(Student student, KnowledgePoint kp,
     
     kpScoreDetailRepository.save(detail);
 }
-
-private double calculateAvgMasteryForKnowledgePoint(Homework homework, KnowledgePoint kp, List<Submission> submissions) {
-    if (submissions.isEmpty()) return 0;
-    
-    // 简化逻辑：如果作业关联了该知识点，则使用学生的作业得分率
-    // 实际可以根据题目-知识点映射更精确计算
-    double total = 0;
-    int count = 0;
-    for (Submission sub : submissions) {
-        if (sub.getScore() != null) {
-            double scoreRate = (homework.getTotalScore() != null && homework.getTotalScore() > 0)
-                ? sub.getScore() / homework.getTotalScore() * 100
-                : sub.getScore();
-            total += scoreRate;
-            count++;
-        }
-    }
-    return count > 0 ? total / count : 0;
-}
-
     private void ensureEnrollment(Student student, Course course) {
         List<Enrollment> enrollments = enrollmentRepository.findByStudentAndCourse(student, course);
         if (enrollments.isEmpty()) {
             Enrollment newEnrollment = new Enrollment();
             newEnrollment.setStudent(student);
             newEnrollment.setCourse(course);
-            newEnrollment.setSemester(getCurrentSemester());
             newEnrollment.setStatus(CourseStatus.ONGOING);
             newEnrollment.setProgress(0);
             newEnrollment.setEnrolledAt(LocalDateTime.now());
@@ -882,318 +814,6 @@ private double calculateAvgMasteryForKnowledgePoint(Homework homework, Knowledge
         homework.setAvgScore(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP));
         homework.setPassRate(BigDecimal.valueOf(passCount * 100.0 / submissions.size()).setScale(2, RoundingMode.HALF_UP));
         homeworkRepository.save(homework);
-    }
-
-    // ==================== 7. AI分析（导入成绩后自动调用） ====================
-
-    private boolean callAiAndSaveAnalysis(Homework homework, List<Submission> submissions) {
-        try {
-            // 获取课程知识点
-            List<KnowledgePoint> kps = knowledgePointRepository.findByCourse(homework.getCourse());
-            
-            // 分析成绩分布
-            List<Double> scores = submissions.stream()
-                .map(Submission::getScore)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-            
-            double avg = scores.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-            long passCount = scores.stream().filter(s -> s >= 60).count();
-            long excellentCount = scores.stream().filter(s -> s >= 80).count();
-            
-            // 构建AI分析数据
-            Map<String, Object> aiAnalysisData = new HashMap<>();
-            List<String> strengths = new ArrayList<>();
-            List<String> weaknesses = new ArrayList<>();
-            
-            // 分析各知识点掌握情况
-            List<Map<String, Object>> kpAnalysis = analyzeKnowledgePoints(homework, submissions, kps, strengths, weaknesses);
-            
-            String summary = generateHomeworkSummary(homework, avg, passCount, scores.size());
-            String suggestions = generateHomeworkSuggestions(kpAnalysis, avg);
-            
-            Map<String, Object> scoreDistribution = new HashMap<>();
-            scoreDistribution.put("avgScore", avg);
-            scoreDistribution.put("passRate", scores.size() > 0 ? passCount * 100.0 / scores.size() : 0);
-            scoreDistribution.put("excellentRate", scores.size() > 0 ? excellentCount * 100.0 / scores.size() : 0);
-            
-            aiAnalysisData.put("summary", summary);
-            aiAnalysisData.put("strengths", strengths);
-            aiAnalysisData.put("weaknesses", weaknesses);
-            aiAnalysisData.put("suggestions", suggestions);
-            aiAnalysisData.put("knowledgePointAnalysis", kpAnalysis);
-            aiAnalysisData.put("scoreDistribution", scoreDistribution);
-            
-            // 存储到homework.ai_parsed_data
-            homework.setAiParsedData(objectMapper.writeValueAsString(aiAnalysisData));
-            homeworkRepository.save(homework);
-            
-            // 更新学生知识点掌握度
-            updateStudentKnowledgeMastery(homework, submissions, kps);
-            
-            // 存储到ai_analysis_report表
-             saveAiAnalysisReport(homework, "HOMEWORK", summary, suggestions, aiAnalysisData);
-            
-            return true;
-        } catch (Exception e) {
-            log.error("AI分析失败", e);
-            return false;
-        }
-    }
-
-    private List<Map<String, Object>> analyzeKnowledgePoints(Homework homework, List<Submission> submissions, 
-                                                               List<KnowledgePoint> kps, List<String> strengths, List<String> weaknesses) {
-        List<Map<String, Object>> kpAnalysis = new ArrayList<>();
-        
-        for (KnowledgePoint kp : kps) {
-            Map<String, Object> kpResult = new HashMap<>();
-            kpResult.put("knowledgePointId", kp.getId());
-            kpResult.put("knowledgePointName", kp.getName());
-            
-            // 计算该知识点的平均得分率（简化逻辑）
-            double avgRate = 70 + Math.random() * 20; // 模拟数据
-            kpResult.put("avgScoreRate", Math.round(avgRate * 100) / 100.0);
-            
-            String level = avgRate >= 70 ? "GOOD" : (avgRate >= 50 ? "MODERATE" : "WEAK");
-            kpResult.put("level", level);
-            kpAnalysis.add(kpResult);
-            
-            if (avgRate >= 70) strengths.add(kp.getName());
-            else if (avgRate < 50) weaknesses.add(kp.getName());
-        }
-        
-        return kpAnalysis;
-    }
-
-    private String generateHomeworkSummary(Homework homework, double avg, long passCount, int totalCount) {
-    StringBuilder sb = new StringBuilder();
-    sb.append(homework.getName()).append("作业成绩分析：\n");
-    sb.append("班级平均分").append(String.format("%.1f", avg)).append("分，");
-    sb.append("及格率").append(String.format("%.1f", passCount * 100.0 / totalCount)).append("%。\n");
-    
-    if (avg >= 85) {
-        sb.append("整体表现优秀，学生掌握情况良好。");
-    } else if (avg >= 70) {
-        sb.append("整体表现良好，部分知识点需要巩固。");
-    } else if (avg >= 60) {
-        sb.append("整体表现中等，建议加强练习。");
-    } else {
-        sb.append("整体表现有待提升，需要重点关注。");
-    }
-    
-    return sb.toString();
-}
-
-    private String generateHomeworkSuggestions(List<Map<String, Object>> kpAnalysis, double avg) {
-    List<String> weakKps = kpAnalysis.stream()
-        .filter(k -> "WEAK".equals(k.get("level")))
-        .map(k -> (String) k.get("knowledgePointName"))
-        .collect(Collectors.toList());
-    
-    StringBuilder sb = new StringBuilder();
-    if (!weakKps.isEmpty()) {
-        sb.append("1. 针对薄弱知识点进行专项练习：").append(String.join("、", weakKps)).append("\n");
-    }
-    
-    if (avg < 70) {
-        sb.append("2. 建议加强基础知识讲解和巩固练习\n");
-    }
-    
-    sb.append("3. 对成绩较低的学生进行个别辅导\n");
-    sb.append("4. 组织作业讲评课，分析典型错题");
-    
-    return sb.toString();
-}
-
-    private void updateStudentKnowledgeMastery(Homework homework, List<Submission> submissions, List<KnowledgePoint> kps) {
-        for (Submission submission : submissions) {
-            Student student = submission.getStudent();
-            for (KnowledgePoint kp : kps) {
-                Double scoreRate = submission.getScore() != null ? 
-                    submission.getScore().doubleValue() / homework.getTotalScore() * 100 : 0;
-                
-                Optional<StudentKnowledgeMastery> existing = masteryRepository
-                    .findByStudentAndKnowledgePoint(student, kp);
-                
-                StudentKnowledgeMastery mastery;
-                if (existing.isPresent()) {
-                    mastery = existing.get();
-                    double newLevel = mastery.getMasteryLevel().doubleValue() * 0.7 + scoreRate * 0.3;
-                    mastery.setMasteryLevel(Math.min(newLevel, 100));
-                } else {
-                    mastery = new StudentKnowledgeMastery();
-                    mastery.setStudent(student);
-                    mastery.setKnowledgePoint(kp);
-                    mastery.setMasteryLevel(scoreRate);
-                }
-                mastery.setUpdatedAt(LocalDateTime.now());
-                
-                if (scoreRate < 50) mastery.setWeaknessLevel("SEVERE");
-                else if (scoreRate < 60) mastery.setWeaknessLevel("MODERATE");
-                else if (scoreRate < 70) mastery.setWeaknessLevel("MILD");
-                else mastery.setWeaknessLevel("GOOD");
-                
-                masteryRepository.save(mastery);
-            }
-        }
-    }
-
-   private void saveAiAnalysisReport(Homework homework, String reportType, 
-        String summary, String suggestions, Map<String, Object> analysisData) {
-    try {
-        AiAnalysisReport report = new AiAnalysisReport();
-        report.setTargetType("HOMEWORK");
-        report.setTargetId(homework.getId());
-        // semester 字段暂时设为 null，因为 semester 表已废弃
-        report.setReportType(reportType);
-        report.setAnalysisData(objectMapper.writeValueAsString(analysisData));
-        report.setSuggestions(suggestions);
-        report.setSummary(summary);
-        report.setCreatedAt(LocalDateTime.now());
-        
-        aiReportRepository.save(report);
-    } catch (Exception e) {
-        log.error("保存AI分析报告失败", e);
-    }
-}
-
-    // ==================== 8. AI整体分析报告 ====================
-
-    @Transactional(readOnly = true)
-public HomeworkAiAnalysisVO getOverallAiAnalysis(Long currentUserId, String userRole, Long classId, Long courseId) {
-    List<Long> courseIds = getVisibleCourseIds(currentUserId, userRole, courseId);
-    if (courseIds.isEmpty()) {
-        return generateMockAiAnalysis();
-    }
-    
-    // 从 ai_analysis_report 表获取最新的综合分析报告
-    if (courseId != null) {
-        AiAnalysisReport report = aiReportRepository
-            .findFirstByTargetTypeAndTargetIdAndReportTypeOrderByCreatedAtDesc(
-                "COURSE", courseId, "HOMEWORK_OVERALL");
-        if (report != null) {
-            return convertToAiAnalysisVO(report);
-        }
-    }
-    
-    // 如果没有，生成新的分析并保存
-    List<Homework> homeworks = homeworkRepository.findWithFilters(courseIds, null, Pageable.unpaged()).getContent();
-    if (homeworks.isEmpty()) {
-        return generateMockAiAnalysis();
-    }
-    
-    return generateAndSaveOverallAnalysis(courseId, homeworks);
-}
-
-   private HomeworkAiAnalysisVO generateAndSaveOverallAnalysis(Long courseId, List<Homework> homeworks) {
-    double totalAvg = 0;
-    int count = 0;
-    int weakCount = 0;
-    
-    for (Homework hw : homeworks) {
-        if (hw.getAvgScore() != null) {
-            totalAvg += hw.getAvgScore().doubleValue();
-            count++;
-        }
-        if (hw.getAvgScore() != null && hw.getAvgScore().doubleValue() < 70) {
-            weakCount++;
-        }
-    }
-    
-    double overallAvg = count > 0 ? totalAvg / count : 0;
-    
-    StringBuilder summary = new StringBuilder();
-    summary.append("本学期共布置 ").append(homeworks.size()).append(" 次作业，");
-    summary.append("平均分 ").append(String.format("%.1f", overallAvg)).append(" 分。");
-    
-    if (overallAvg >= 80) {
-         summary.append("整体作业完成质量优秀，学生掌握情况良好。");
-    } else if (overallAvg >= 70) {
-        summary.append("整体作业完成质量良好，部分知识点需要加强。");
-    } else {
-        summary.append("整体作业完成质量有待提升，建议加强教学辅导。");
-    }
-    
-    List<String> suggestionsList = Arrays.asList(
-        "1. 针对薄弱知识点增加专项练习",
-        "2. 鼓励学生按时提交作业，提高完成率",
-        "3. 定期组织作业讲评，帮助学生查漏补缺"
-    );
-    
-    Map<String, Object> analysisData = new HashMap<>();
-    analysisData.put("totalHomework", homeworks.size());
-    analysisData.put("overallAvgScore", overallAvg);
-    analysisData.put("weakHomeworkCount", weakCount);
-    
-    String suggestions = String.join("\n", suggestionsList);
-    
-    // 保存到数据库（如果 courseId 不为空）
-     if (courseId != null) {
-        saveAiAnalysisReportForCourse(courseId, summary.toString(), suggestions, analysisData);
-    }
-    
-    return HomeworkAiAnalysisVO.builder()
-        .summary(summary.toString())
-        .strengths(Arrays.asList("作业提交率高", "学生参与积极"))
-        .weaknesses(Arrays.asList("部分知识点掌握不牢固"))
-        .suggestions(suggestionsList)
-        .analysisData(analysisData)
-        .createdAt(LocalDateTime.now())
-        .build();
-}
-
-private void saveAiAnalysisReportForCourse(Long courseId, String summary, String suggestions, Map<String, Object> analysisData) {
-    try {
-        AiAnalysisReport report = new AiAnalysisReport();
-        report.setTargetType("COURSE");
-        report.setTargetId(courseId);
-        report.setReportType("HOMEWORK_OVERALL");
-        report.setAnalysisData(objectMapper.writeValueAsString(analysisData));
-        report.setSuggestions(suggestions);
-        report.setSummary(summary);
-        report.setCreatedAt(LocalDateTime.now());
-        aiReportRepository.save(report);
-    } catch (Exception e) {
-        log.error("保存综合分析报告失败", e);
-    }
-}
-
-private HomeworkAiAnalysisVO convertToAiAnalysisVO(AiAnalysisReport report) {
-    try {
-        Map<String, Object> data = objectMapper.readValue(report.getAnalysisData(), Map.class);
-        List<String> suggestions = report.getSuggestions() != null 
-            ? Arrays.asList(report.getSuggestions().split("\n")) 
-            : new ArrayList<>();
-        
-        return HomeworkAiAnalysisVO.builder()
-            .summary(report.getSummary())
-            .strengths((List<String>) data.getOrDefault("strengths", new ArrayList<>()))
-            .weaknesses((List<String>) data.getOrDefault("weaknesses", new ArrayList<>()))
-            .suggestions(suggestions)
-            .analysisData(data)
-            .createdAt(report.getCreatedAt())
-            .build();
-    } catch (Exception e) {
-        log.error("转换AI报告失败", e);
-        return generateMockAiAnalysis();
-    }
-}
-
-
-    private HomeworkAiAnalysisVO generateMockAiAnalysis() {
-        Map<String, Object> analysisData = new HashMap<>();
-        analysisData.put("avgScore", 78.5);
-        analysisData.put("passRate", 85.2);
-        
-        return HomeworkAiAnalysisVO.builder()
-            .summary("本学期作业分析：整体完成质量良好，平均分78.5分。建议重点关注薄弱知识点的强化练习。")
-            .strengths(Arrays.asList("基础知识掌握扎实", "作业提交及时", "学习态度积极"))
-            .weaknesses(Arrays.asList("综合应用能力待提升", "部分学生存在拖延现象"))
-            .suggestions(Arrays.asList("开展小组互助学习", "每周一次综合练习", "建立作业积分奖励机制"))
-            .analysisData(analysisData)
-            .chartsConfig(new HashMap<>())
-            .createdAt(LocalDateTime.now())
-            .build();
     }
 
     @Transactional
@@ -1256,17 +876,6 @@ private HomeworkAiAnalysisVO convertToAiAnalysisVO(AiAnalysisReport report) {
             }
         }
     }
-
-    private Semester getCurrentSemester() {
-        return semesterRepository.findByIsCurrentTrue()
-            .orElseGet(() -> {
-                Semester defaultSemester = new Semester();
-                defaultSemester.setId(1L);
-                defaultSemester.setName("2025-2026学年第1学期");
-                return defaultSemester;
-            });
-    }
-
     private String getHomeworkStatusText(HomeworkStatus status) {
         Map<String, String> statusMap = new HashMap<>();
         statusMap.put("ONGOING", "进行中");

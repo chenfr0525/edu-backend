@@ -22,6 +22,7 @@ import com.edu.domain.Homework;
 import com.edu.domain.Semester;
 import com.edu.domain.Submission;
 import com.edu.domain.SubmissionStatus;
+import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.HomeworkAiAnalysisDTO;
 import com.edu.domain.dto.HomeworkAnalysisDTO;
 import com.edu.domain.dto.HomeworkDetailDTO;
@@ -49,8 +50,7 @@ public class HomeworkAnalysisService {
     private final StudentService studentService;
     private final AiAnalysisReportService aiReportService;
     private final ObjectMapper objectMapper;
-
-    
+    private final UnifiedAiAnalysisService unifiedAiAnalysisService;    
 
     /**
      * 获取当前学期的作业列表（分页+筛选）
@@ -206,38 +206,36 @@ public class HomeworkAnalysisService {
     }
     
     /**
-     * 获取作业整体AI分析报告
-     */
-    public Map<String, Object> getOverallAnalysis() {
-        // 尝试从数据库获取已有的分析报告（按 COURSE 类型）
-        List<Long> courseIds = courseService.findAll().stream()
-                .map(Course::getId)
-                .collect(Collectors.toList());
-        
-        if (courseIds.isEmpty()) {
-            Map<String, Object> analysisData = new HashMap<>();
-            analysisData.put("error", "暂无课程数据");
-            return analysisData;
-        }
-        
-        // 获取第一个课程的报告（或汇总报告）
-        AiAnalysisReport existingReport = aiReportService.findLatestReport("COURSE", courseIds.get(0), "HOMEWORK_OVERALL");
-       
-        if (existingReport != null && existingReport.getCreatedAt().isAfter(LocalDateTime.now().minusDays(7))) {
-            Map<String, Object> analysisData = new HashMap<>();
-            analysisData.put("summary", existingReport.getSummary());
-            analysisData.put("suggestions", existingReport.getSuggestions());
-            analysisData.put("analysisData", existingReport.getAnalysisData());
-            analysisData.put("createdAt", existingReport.getCreatedAt());
-            analysisData.put("fromCache", true);
-            return analysisData;
-        }
-        
-        // 生成新的分析报告
-        Map<String, Object> overallAnalysis = generateOverallAnalysis();
-        overallAnalysis.put("fromCache", false);
-        return overallAnalysis;
+ * 获取作业整体AI分析报告（迁移到统一服务）
+ */
+public Map<String, Object> getOverallAnalysis() {
+    List<Long> courseIds = courseService.findAll().stream()
+            .map(Course::getId)
+            .collect(Collectors.toList());
+    
+    if (courseIds.isEmpty()) {
+        Map<String, Object> analysisData = new HashMap<>();
+        analysisData.put("error", "暂无课程数据");
+        return analysisData;
     }
+        
+       AiSuggestionDTO suggestion = unifiedAiAnalysisService.getOrCreateAnalysis(
+        "COURSE",
+        courseIds.get(0),
+        "HOMEWORK_OVERALL",
+        false
+    );
+    
+    // 转换为前端需要的格式
+    Map<String, Object> result = new HashMap<>();
+    result.put("summary", suggestion.getSummary());
+    result.put("suggestions", String.join("\n", suggestion.getSuggestions()));
+    result.put("analysisData", suggestion);
+    result.put("createdAt", LocalDateTime.now());
+    result.put("fromCache", false);
+    
+    return result;
+}
     
     // ==================== 私有辅助方法 ====================
     
@@ -376,33 +374,34 @@ public class HomeworkAnalysisService {
         return BigDecimal.valueOf(avgRate).setScale(2, RoundingMode.HALF_UP);
     }
 
-     /**
-     * 从 ai_analysis_report 表获取AI分析
-     */
-    private HomeworkAiAnalysisDTO getAiAnalysisFromReport(Homework homework) {
-        try {
-            AiAnalysisReport report = aiReportService.findLatestReport("HOMEWORK", homework.getId(), "HOMEWORK_ANALYSIS");
-            if (report == null) {
-                return null;
-            }
-            
-            Map<String, Object> data = objectMapper.readValue(report.getAnalysisData(), Map.class);
-            List<String> suggestions = report.getSuggestions() != null 
-                ? Arrays.asList(report.getSuggestions().split("\n")) 
-                : new ArrayList<>();
-            
-            return HomeworkAiAnalysisDTO.builder()
-                .summary(report.getSummary())
-                .strengths((List<String>) data.getOrDefault("strengths", new ArrayList<>()))
-                .weaknesses((List<String>) data.getOrDefault("weaknesses", new ArrayList<>()))
-                .suggestions(suggestions)
-                .detailedReport((String) data.getOrDefault("detailedReport", ""))
-                .build();
-        } catch (Exception e) {
-            log.error("获取AI分析报告失败", e);
+    /**
+ * 从统一服务获取AI分析
+ */
+private HomeworkAiAnalysisDTO getAiAnalysisFromReport(Homework homework) {
+    try {
+        // 使用统一AI服务
+        AiSuggestionDTO suggestion = unifiedAiAnalysisService.getOrCreateAnalysis(
+            "HOMEWORK",              // targetType
+            homework.getId(),        // targetId
+            "HOMEWORK_ANALYSIS",     // reportType
+            false
+        );
+        
+        if (suggestion == null) {
             return null;
         }
+            return HomeworkAiAnalysisDTO.builder()
+            .summary(suggestion.getSummary())
+            .strengths(suggestion.getStrengths())
+            .weaknesses(suggestion.getWeaknesses())
+            .suggestions(suggestion.getSuggestions())
+            .detailedReport(suggestion.getSummary())
+            .build();
+    } catch (Exception e) {
+        log.error("获取AI分析报告失败", e);
+        return null;
     }
+}
 
      private Map<String, Object> emptyCards() {
         Map<String, Object> statusCardData = new HashMap<>();

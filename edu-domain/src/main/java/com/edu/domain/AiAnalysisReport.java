@@ -1,22 +1,14 @@
 package com.edu.domain;
 
 import java.time.LocalDateTime;
-
 import javax.persistence.*;
-
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 
 @Entity
-@Table(name = "ai_analysis_report", 
-       indexes = {
-           @Index(name = "idx_target", columnList = "target_type, target_id"),
-           @Index(name = "idx_semester", columnList = "semester_id"),
-           @Index(name = "idx_created_at", columnList = "created_at"),
-           @Index(name = "idx_target_hash", columnList = "target_type, target_id, report_type, data_hash")
-       })
+@Table(name = "ai_analysis_report")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -44,7 +36,7 @@ public class AiAnalysisReport {
     private Semester semester;
     
     /**
-     * 报告类型: HOMEWORK/EXAM/ACTIVITY/KNOWLEDGE/COMPREHENSIVE
+     * 报告类型: EXAM_ANALYSIS/HOMEWORK_ANALYSIS/KNOWLEDGE_ANALYSIS/COMPREHENSIVE
      */
     @Column(name = "report_type", nullable = false, length = 30)
     private String reportType;
@@ -52,13 +44,13 @@ public class AiAnalysisReport {
     /**
      * AI分析数据(JSON格式) - 存储源数据的JSON
      */
-    @Column(name = "analysis_data", columnDefinition = "JSON")
+    @Column(name = "analysis_data", columnDefinition = "TEXT")
     private String analysisData;
     
     /**
      * 可视化图表配置(JSON格式)
      */
-    @Column(name = "charts_config", columnDefinition = "JSON")
+    @Column(name = "charts_config", columnDefinition = "TEXT")
     private String chartsConfig;
     
     /**

@@ -143,7 +143,7 @@ Page<ExamGrade> findByExamIdAndKeyword(@Param("examId") Long examId,
  */
 @Query("SELECT COUNT(eg) FROM ExamGrade eg WHERE eg.exam.id = :examId AND eg.score >= :score")
 Long countByExamIdAndScoreGreaterThanEqual(@Param("examId") Long examId, 
-                                            @Param("score") Double score);
+                                            @Param("score") Integer score);
 
 /**
  * 获取考试的成绩统计

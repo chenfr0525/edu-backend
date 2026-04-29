@@ -22,9 +22,6 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class StudentHomeworkAnalysisController {
    private final StudentHomeworkAnalysisService analysisService;
-   private final StudentService studentService;
-   private final HomeworkRepository homeworkRepository;
-   private final AiAnalysisReportService aiReportService;
 
     @GetMapping("/list/{studentId}")
     public Result<List<StudentHomeworkDTO>> getHomeworkList(
@@ -60,12 +57,10 @@ public class StudentHomeworkAnalysisController {
         return Result.success(trendData);
     }
 
-    @GetMapping("/overall-analysis/{studentId}")
-    public Result<Map<String, Object>> getOverallAnalysis(@PathVariable Long studentId) {
-        Map<String, Object> analysis = analysisService.getStudentOverallAnalysis(studentId);
-        return Result.success(analysis);
-    }
-
+     /**
+     * 5. 手动刷新 AI 分析报告
+     * POST /api/analysis/student/homework/refresh/{studentId}/{homeworkId}
+     */
     @PostMapping("/refresh/{studentId}/{homeworkId}")
     public Result<AiSuggestionDTO> refreshAiAnalysis(
             @PathVariable Long studentId,

@@ -6,7 +6,6 @@ import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.FieldMapping;
 import com.edu.domain.dto.ParseResult;
 import com.edu.domain.dto.ValidationError;
-import com.edu.repository.ClassRepository;
 import com.edu.repository.StudentRepository;
 import com.edu.repository.UserRepository;
 
@@ -81,26 +80,42 @@ public class DeepSeekService {
 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                log.error("DeepSeek API 调用失败，HTTP 状态码: {}", response.code());
-                if (response.body() != null) {
-                    log.error("错误详情: {}", response.body().string());
-                }
-                return "抱歉，AI 服务暂时不可用，请稍后再试。";
+                String errorBody = response.body() != null ? response.body().string() : "无响应内容";
+            log.error("DeepSeek API 调用失败，HTTP 状态码: {}, 错误详情: {}", response.code(), errorBody);
+            
+            // 根据不同的状态码抛出不同的异常
+            if (response.code() == 401) {
+                throw new RuntimeException("DeepSeek API 认证失败，请检查 API Key 配置");
+            } else if (response.code() == 429) {
+                throw new RuntimeException("DeepSeek API 请求频率超限，请稍后重试");
+            } else if (response.code() >= 500) {
+                throw new RuntimeException("DeepSeek API 服务器错误，请稍后重试");
+            } else {
+                throw new RuntimeException(String.format("DeepSeek API 调用失败，状态码: %d", response.code()));
             }
-
+        }
             if (response.body() == null) {
-                log.error("DeepSeek API 返回的响应体为空");
-                return "抱歉，AI 服务返回了空数据。";
-            }
+            log.error("DeepSeek API 返回的响应体为空");
+            throw new RuntimeException("DeepSeek API 返回空响应");
+        }
 
             String responseBody = response.body().string();
             log.debug("DeepSeek API 原始响应: {}", responseBody);
 
             JSONObject jsonResponse = JSON.parseObject(responseBody);
+            if (!jsonResponse.containsKey("choices") || jsonResponse.getJSONArray("choices").isEmpty()) {
+            log.error("DeepSeek API 响应格式异常: {}", responseBody);
+            throw new RuntimeException("DeepSeek API 响应格式异常，缺少 choices 字段");
+        }
             String content = jsonResponse.getJSONArray("choices")
                     .getJSONObject(0)
                     .getJSONObject("message")
                     .getString("content");
+
+        if (content == null || content.trim().isEmpty()) {
+            log.error("DeepSeek API 返回空内容");
+            throw new RuntimeException("DeepSeek API 返回空内容");
+        }
 
             log.info("DeepSeek API 调用成功，回复内容长度: {}", content.length());
             return content;
@@ -140,12 +155,11 @@ public class DeepSeekService {
             dataType, dataJson
         );
 
+         try {
         // 调用通用对话方法
         String resultJson = chatWithDeepSeek(prompt);
         log.info("DeepSeek 原始返回: {}", resultJson);
 
-        // 尝试解析
-        try {
             String cleanJson = extractJsonFromResponse(resultJson);
             log.info("提取后的 JSON: {}", cleanJson);
             
@@ -165,7 +179,7 @@ public class DeepSeekService {
             return response;
             
         } catch (Exception e) {
-            log.error("解析 DeepSeek 返回的结果失败，原始内容: {}", resultJson, e);
+            log.error("调用 DeepSeek API 失败", e);
             
             // 返回错误响应
             AiSuggestionDTO errorResponse = new AiSuggestionDTO();

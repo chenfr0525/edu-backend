@@ -34,6 +34,7 @@ import com.edu.domain.Semester;
 import com.edu.domain.Student;
 import com.edu.domain.StudentKnowledgeMastery;
 import com.edu.domain.User;
+import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.ExamGradeImportResult;
 import com.edu.domain.dto.FieldMapping;
 import com.edu.domain.dto.ValidationError;
@@ -65,8 +66,7 @@ public class ExamGradeImportValidator {
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final ActivitySyncService activitySyncService;
-
-    
+    private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
     /**
      * 确认导入考试成绩
@@ -115,16 +115,17 @@ public class ExamGradeImportValidator {
             }
         }
 
-        // 更新考试统计数据
+         // 更新考试统计数据
         updateExamStatistics(exam);
 
+        // 处理知识点掌握度（触发AI分析）
         boolean aiCompleted = processExamGradesAndUpdateMastery(exam, savedGrades);
 
         String summary = String.format("导入完成！成功：%d条（新增%d条，更新%d条），失败：%d条", 
             successCount, successCount - updateCount, updateCount, failCount);
         log.info(summary);
 
-       return ExamGradeImportResult.builder()
+        return ExamGradeImportResult.builder()
             .success(failCount == 0)
             .successCount(successCount)
             .failCount(failCount)
@@ -136,7 +137,7 @@ public class ExamGradeImportValidator {
     }
 
      /**
-     * 处理考试成绩并更新知识点掌握度
+     * 处理考试成绩并更新知识点掌握度（迁移到统一服务）
      */
     private boolean processExamGradesAndUpdateMastery(Exam exam, List<ExamGrade> grades) {
         try {
@@ -148,91 +149,41 @@ public class ExamGradeImportValidator {
                 return false;
             }
             
-            // 获取知识点信息
             List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
-
-              if (kps.isEmpty()) {
+            if (kps.isEmpty()) {
                 log.warn("未找到知识点信息，跳过掌握度计算");
                 return false;
             }
-            
-            // 统计信息用于AI分析
-            List<Integer> scores = grades.stream()
-                .map(ExamGrade::getScore)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-            
-            double avg = scores.stream().mapToInt(Integer::intValue).average().orElse(0);
-            long passCount = scores.stream().filter(s -> s >= exam.getPassScore()).count();
-            long excellentCount = scores.stream().filter(s -> s >= 80).count();
-            
-            // 构建AI分析数据
-            Map<String, Object> aiAnalysisData = new HashMap<>();
-            List<String> strengths = new ArrayList<>();
-            List<String> weaknesses = new ArrayList<>();
 
+            // 1. 更新学生知识点掌握度（原有逻辑保留）
             for (ExamGrade grade : grades) {
                 Student student = grade.getStudent();
                 Double scoreRate = (grade.getScore() != null && exam.getFullScore() != null && exam.getFullScore() > 0)
                     ? grade.getScore().doubleValue() / exam.getFullScore() * 100
                     : (grade.getScore() != null ? grade.getScore().doubleValue() : 0);
                 
-                // 自动创建选课记录（确保学生已加入该课程）
+                // 自动创建选课记录
                 ensureEnrollment(student, exam.getCourse());
                 
-                for (KnowledgePoint kp : kps) {
-                    // 更新 student_knowledge_mastery 表
+               for (KnowledgePoint kp : kps) {
                     updateStudentMastery(student, kp, scoreRate);
-                    
-                    // 更新 knowledge_point_score_detail 表
                     saveKnowledgePointScoreDetail(student, kp, "EXAM", exam.getId(), scoreRate);
                 }
             }
-
-             // 分析知识点掌握情况（用于AI报告）
-            List<Map<String, Object>> kpAnalysis = new ArrayList<>();
-            for (KnowledgePoint kp : kps) {
-                Map<String, Object> kpResult = new HashMap<>();
-                kpResult.put("knowledgePointId", kp.getId());
-                kpResult.put("knowledgePointName", kp.getName());
-                
-                // 计算该知识点在本次考试中的平均掌握度
-                double avgRate = calculateAvgMasteryForKnowledgePoint(exam, kp, grades);
-                kpResult.put("avgScoreRate", Math.round(avgRate * 100) / 100.0);
-                
-                String level = avgRate >= 70 ? "GOOD" : (avgRate >= 50 ? "MODERATE" : "WEAK");
-                kpResult.put("level", level);
-                kpAnalysis.add(kpResult);
-                
-                if (avgRate >= 70) strengths.add(kp.getName());
-                else if (avgRate < 50) weaknesses.add(kp.getName());
-            }
-
-             // 生成AI分析摘要和建议
-            String summary = generateExamSummary(exam, avg, passCount, scores.size());
-            String suggestions = generateExamSuggestions(kpAnalysis, avg, passCount);
+            // 2. 使用统一服务生成AI分析报告（自动保存）
+            // 注意：这里不需要手动保存，统一服务会自动处理
+            AiSuggestionDTO aiResult = unifiedAiAnalysisService.getOrCreateAnalysis(
+                "EXAM",           // targetType: 考试类型
+                exam.getId(),     // targetId: 考试ID
+                "EXAM_ANALYSIS",  // reportType: 考试分析
+                true              // 强制刷新（因为刚导入新数据）
+            );
             
-            Map<String, Object> scoreDistribution = new HashMap<>();
-            scoreDistribution.put("avgScore", avg);
-            scoreDistribution.put("highestScore", scores.isEmpty() ? 0 : Collections.max(scores));
-            scoreDistribution.put("lowestScore", scores.isEmpty() ? 0 : Collections.min(scores));
-            scoreDistribution.put("passRate", scores.size() > 0 ? passCount * 100.0 / scores.size() : 0);
-            scoreDistribution.put("passCount", passCount);
-            scoreDistribution.put("excellentRate", scores.size() > 0 ? excellentCount * 100.0 / scores.size() : 0);
-            scoreDistribution.put("excellentCount", excellentCount);
-            scoreDistribution.put("failCount", scores.size() - passCount);
-            
-            aiAnalysisData.put("summary", summary);
-            aiAnalysisData.put("strengths", strengths);
-            aiAnalysisData.put("weaknesses", weaknesses);
-            aiAnalysisData.put("suggestions", suggestions);
-            aiAnalysisData.put("knowledgePointAnalysis", kpAnalysis);
-            aiAnalysisData.put("scoreDistribution", scoreDistribution);
-            
-            // 保存到 ai_analysis_report 表（不再存到 exam.aiParsedData）
-            saveAiAnalysisReport(exam, summary, suggestions, aiAnalysisData);
+            log.info("考试成绩AI分析完成，考试ID: {}, 摘要: {}", exam.getId(), 
+                aiResult != null ? aiResult.getSummary() : "无");
             
             return true;
+            
         } catch (Exception e) {
             log.error("处理考试成绩失败", e);
             return false;
@@ -409,97 +360,7 @@ public class ExamGradeImportValidator {
         
         kpScoreDetailRepository.save(detail);
     }
-
-    /**
-     * 计算某个知识点在本次考试中的平均掌握度
-     */
-    private double calculateAvgMasteryForKnowledgePoint(Exam exam, KnowledgePoint kp, List<ExamGrade> grades) {
-        if (grades.isEmpty()) return 0;
-        
-        double total = 0;
-        int count = 0;
-        for (ExamGrade grade : grades) {
-            if (grade.getScore() != null && exam.getFullScore() != null && exam.getFullScore() > 0) {
-                double scoreRate = grade.getScore().doubleValue() / exam.getFullScore() * 100;
-                total += scoreRate;
-                count++;
-            }
-        }
-        return count > 0 ? total / count : 0;
-    }
-
-     /**
-     * 生成考试摘要
-     */
-    private String generateExamSummary(Exam exam, double avg, long passCount, long totalCount) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(exam.getName()).append("考试成绩分析：\n");
-        sb.append("班级平均分").append(String.format("%.1f", avg)).append("分，");
-        sb.append("及格率").append(String.format("%.1f", passCount * 100.0 / totalCount)).append("%。\n");
-        
-        long failCount = totalCount - passCount;
-        if (failCount > totalCount * 0.2) {
-            sb.append("不及格人数较多，需要重点关注后进生。");
-        } else if (avg >= 80) {
-            sb.append("整体成绩优秀，教学效果良好。");
-        } else if (avg >= 70) {
-            sb.append("整体成绩良好，继续保持。");
-        } else {
-            sb.append("整体成绩有待提升，建议加强教学。");
-        }
-        
-        return sb.toString();
-    }
-
-     /**
-     * 生成考试建议
-     */
-    private String generateExamSuggestions(List<Map<String, Object>> kpAnalysis, double avg, long passCount) {
-        List<String> weakKps = kpAnalysis.stream()
-            .filter(k -> "WEAK".equals(k.get("level")))
-            .map(k -> (String) k.get("knowledgePointName"))
-            .collect(Collectors.toList());
-
-        StringBuilder sb = new StringBuilder();
-        if (!weakKps.isEmpty()) {
-            sb.append("1. 针对薄弱知识点进行专项复习：").append(String.join("、", weakKps)).append("\n");
-        }
-        
-        if (avg < 70) {
-            sb.append("2. 建议放慢教学进度，加强基础知识巩固\n");
-        }
-        
-        if (passCount * 100.0 / (kpAnalysis.size() > 0 ? 100 : 1) < 80) {
-            sb.append("3. 组织试卷讲评课，分析典型错题\n");
-        }
-        
-        sb.append("4. 对成绩波动较大的学生进行个别辅导");
-        return sb.toString();
-    }
-
-    /**
-     * 保存AI分析报告到 ai_analysis_report 表
-     */
-    private void saveAiAnalysisReport(Exam exam, String summary, String suggestions, Map<String, Object> analysisData) {
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            AiAnalysisReport report = AiAnalysisReport.builder()
-                .targetType("EXAM")
-                .targetId(exam.getId())
-                .reportType("EXAM_ANALYSIS")
-                .analysisData(objectMapper.writeValueAsString(analysisData))
-                .suggestions(suggestions)
-                .summary(summary)
-                .createdAt(LocalDateTime.now())
-                .build();
-            
-            aiReportRepository.save(report);
-            log.info("保存考试AI分析报告成功，考试ID: {}", exam.getId());
-        } catch (Exception e) {
-            log.error("保存AI分析报告失败", e);
-        }
-    }
-
+    
     /**
      * 获取考试成绩字段映射配置
      */

@@ -152,39 +152,7 @@ public class StudentDashboardController {
         } else {
             dashboard.put("activityWarning", null);
             dashboard.put("activityWarningLevel", "GOOD");
-        }
-        
-        // 14. AI分析报告
-        AiAnalysisReport aiReport = studentDashboardAiService.getOrCreateDashboardReport(studentId);
-        if (aiReport != null) {
-            dashboard.put("aiSuggestions", aiReport.getSuggestions());
-            dashboard.put("aiSummary", aiReport.getSummary());
-            dashboard.put("aiGeneratedAt", aiReport.getCreatedAt());
-        } else {
-            dashboard.put("aiSuggestions", "暂无AI分析建议，请稍后重试");
-            dashboard.put("aiSummary", "数据不足，无法生成分析报告");
-            dashboard.put("aiGeneratedAt", null);
-        }
-        
-        // 15. 下次考试提醒
-        List<Enrollment> enrollments = enrollmentService.findByStudent(student);
-        List<Exam> upcomingExams = examService.findUpcomingExams();
-        List<Map<String, Object>> upcomingExamList = new ArrayList<>();
-        for (Exam exam : upcomingExams) {
-            boolean isEnrolled = enrollments.stream()
-                .anyMatch(e -> e.getCourse().getId().equals(exam.getCourse().getId()));
-            if (isEnrolled && exam.getExamDate() != null) {
-                Map<String, Object> examInfo = new HashMap<>();
-                examInfo.put("examId", exam.getId());
-                examInfo.put("examName", exam.getName());
-                examInfo.put("examDate", exam.getExamDate());
-                examInfo.put("courseName", exam.getCourse().getName());
-                examInfo.put("daysLeft", java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), exam.getExamDate()));
-                upcomingExamList.add(examInfo);
-            }
-        }
-        dashboard.put("upcomingExams", upcomingExamList);
-        
+        }        
         return Result.success(dashboard);
     }
     
