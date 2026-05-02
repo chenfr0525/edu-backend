@@ -31,6 +31,9 @@ public interface ExamGradeRepository extends JpaRepository<ExamGrade, Long> {
 
   // 查询某学生的所有成绩
     List<ExamGrade> findByStudent(Student student);
+
+    // 查询某学生的所有成绩
+    List<ExamGrade> findByStudentId(Long studentId);
      @Modifying
     @Query("DELETE FROM ExamGrade skm WHERE skm.student.id = :studentId")
     void deleteByStudentId(Long studentId);

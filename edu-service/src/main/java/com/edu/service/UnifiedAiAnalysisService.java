@@ -37,7 +37,6 @@ public class UnifiedAiAnalysisService {
     private final ActivityRecordRepository activityRecordRepository;
     private final ExamRepository examRepository;
     private final HomeworkRepository homeworkRepository;
-    private final UserRepository userRepository;
 
     /**
      * 统一入口：获取或生成AI分析报告
@@ -55,6 +54,15 @@ public class UnifiedAiAnalysisService {
         
         // 1. 收集源数据
         Map<String, Object> sourceData = collectSourceData(targetType, targetId, reportType);
+
+        // 【优化】检查数据是否有效（是否有足够的数据进行分析）
+    DataValidationResult validationResult = validateDataAvailability(targetType, targetId, reportType, sourceData);
+    
+    if (!validationResult.isValid()) {
+        log.info("数据不足，跳过AI调用: targetType={}, targetId={}, reason={}", 
+            targetType, targetId, validationResult.getReason());
+        return createNoDataReport(targetType, targetId, reportType, validationResult.getReason());
+    }
         
         // 2. 计算数据哈希
         String dataHash = calculateDataHash(sourceData);
@@ -844,4 +852,266 @@ private Map<String, BigDecimal> calculateHomeworkClassAvgRates(Homework homework
         String key = targetType + "_" + reportType;
         return typeMap.getOrDefault(key, "数据分析");
     }
+
+    private static class DataValidationResult {
+    private boolean valid;
+    private String reason;
+    
+    public static DataValidationResult valid() {
+        DataValidationResult result = new DataValidationResult();
+        result.valid = true;
+        return result;
+    }
+    
+    public static DataValidationResult invalid(String reason) {
+        DataValidationResult result = new DataValidationResult();
+        result.valid = false;
+        result.reason = reason;
+        return result;
+    }
+    
+    public boolean isValid() { return valid; }
+    public String getReason() { return reason; }
+}
+
+private DataValidationResult validateDataAvailability(String targetType, Long targetId, 
+                                                       String reportType, Map<String, Object> sourceData) {
+    switch (targetType) {
+        case "STUDENT":
+            return validateStudentData(targetId, reportType, sourceData);
+        case "CLASS":
+            return validateClassData(targetId, sourceData);
+        case "COURSE":
+            return validateCourseData(targetId, sourceData);
+        case "EXAM":
+            return validateExamData(targetId, sourceData);
+        case "HOMEWORK":
+            return validateHomeworkData(targetId, sourceData);
+        default:
+            return DataValidationResult.valid();
+    }
+}
+
+/**
+ * 验证学生数据
+ */
+private DataValidationResult validateStudentData(Long studentId, String reportType, Map<String, Object> sourceData) {
+    // 单次考试分析：检查是否有该考试的成绩
+    if (reportType != null && reportType.startsWith("EXAM_ANALYSIS_")) {
+        String examIdStr = reportType.substring("EXAM_ANALYSIS_".length());
+        Long examId = Long.parseLong(examIdStr);
+        Optional<ExamGrade> grade = examGradeRepository.findByExamIdAndStudentId(examId, studentId);
+        if (!grade.isPresent() || grade.get().getScore() == null) {
+            return DataValidationResult.invalid("该考试暂无成绩数据");
+        }
+        return DataValidationResult.valid();
+    }
+    
+    // 单次作业分析：检查是否有该作业的提交记录且已批改
+    if (reportType != null && reportType.startsWith("HOMEWORK_ANALYSIS_")) {
+        String homeworkIdStr = reportType.substring("HOMEWORK_ANALYSIS_".length());
+        Long homeworkId = Long.parseLong(homeworkIdStr);
+        Optional<Submission> submission = submissionRepository.findByStudentIdAndHomeworkId(studentId,homeworkId);
+        if (!submission.isPresent() || submission.get().getScore() == null) {
+            return DataValidationResult.invalid("该作业未提交或尚未批改");
+        }
+        return DataValidationResult.valid();
+    }
+    
+    // 考试整体分析：检查是否有任何考试成绩
+    if ("EXAM_OVERALL".equals(reportType)) {
+        List<ExamGrade> grades = examGradeRepository.findByStudentId(studentId);
+        if (grades == null || grades.isEmpty()) {
+            return DataValidationResult.invalid("暂无任何考试成绩数据");
+        }
+        return DataValidationResult.valid();
+    }
+    
+    // 作业整体分析：检查是否有任何已批改的作业
+    if ("HOMEWORK_OVERALL".equals(reportType)) {
+        List<Submission> submissions = submissionRepository.findGradedByStudentId(studentId);
+        if (submissions == null || submissions.isEmpty()) {
+            return DataValidationResult.invalid("暂无任何已批改的作业数据");
+        }
+        return DataValidationResult.valid();
+    }
+    
+    // 知识点分析：检查是否有知识点掌握数据
+    if ("KNOWLEDGE_ANALYSIS".equals(reportType) || 
+        (reportType != null && reportType.startsWith("KNOWLEDGE_ANALYSIS_COURSE_"))) {
+        List<StudentKnowledgeMastery> masteries = masteryRepository.findByStudentId(studentId);
+        if (masteries == null || masteries.isEmpty()) {
+            return DataValidationResult.invalid("暂无知识点掌握数据，请先完成作业和考试");
+        }
+        return DataValidationResult.valid();
+    }
+    
+    // 综合分析：检查是否有足够的数据
+    if ("COMPREHENSIVE".equals(reportType)) {
+        List<ExamGrade> examGrades = examGradeRepository.findByStudentId(studentId);
+        List<Submission> submissions = submissionRepository.findGradedByStudentId(studentId);
+        List<StudentKnowledgeMastery> masteries = masteryRepository.findByStudentId(studentId);
+        
+        if ((examGrades == null || examGrades.isEmpty()) && 
+            (submissions == null || submissions.isEmpty()) && 
+            (masteries == null || masteries.isEmpty())) {
+            return DataValidationResult.invalid("暂无学习数据，请先完成作业和考试");
+        }
+        return DataValidationResult.valid();
+    }
+    
+    return DataValidationResult.valid();
+}
+
+/**
+ * 验证班级数据
+ */
+private DataValidationResult validateClassData(Long classId, Map<String, Object> sourceData) {
+    // 检查是否有成绩数据
+    Object avgScore = sourceData.get("classAvgScore");
+    if (avgScore == null || (avgScore instanceof Number && ((Number) avgScore).doubleValue() == 0)) {
+        // 进一步检查是否有任何考试数据
+        List<Exam> exams = examRepository.findByClassId(classId);
+        if (exams == null || exams.isEmpty()) {
+            return DataValidationResult.invalid("该班级暂无任何考试数据");
+        }
+    }
+    return DataValidationResult.valid();
+}
+
+/**
+ * 验证课程数据
+ */
+private DataValidationResult validateCourseData(Long courseId, Map<String, Object> sourceData) {
+    Object avgScore = sourceData.get("avgScore");
+    if (avgScore == null || (avgScore instanceof Number && ((Number) avgScore).doubleValue() == 0)) {
+        List<ExamGrade> grades = examGradeRepository.findByCourseId(courseId);
+        if (grades == null || grades.isEmpty()) {
+            return DataValidationResult.invalid("该课程暂无任何成绩数据");
+        }
+    }
+    return DataValidationResult.valid();
+}
+
+/**
+ * 验证考试数据
+ */
+private DataValidationResult validateExamData(Long examId, Map<String, Object> sourceData) {
+    Integer totalStudents = (Integer) sourceData.get("totalStudents");
+    if (totalStudents == null || totalStudents == 0) {
+        return DataValidationResult.invalid("该考试暂无成绩数据");
+    }
+    return DataValidationResult.valid();
+}
+
+/**
+ * 验证作业数据
+ */
+private DataValidationResult validateHomeworkData(Long homeworkId, Map<String, Object> sourceData) {
+    Integer totalStudents = (Integer) sourceData.get("totalStudents");
+    Integer submittedCount = (Integer) sourceData.get("submittedCount");
+    if (totalStudents == null || totalStudents == 0 || submittedCount == null || submittedCount == 0) {
+        return DataValidationResult.invalid("该作业暂无提交记录或尚未批改");
+    }
+    return DataValidationResult.valid();
+}
+
+/**
+ * 创建无数据报告（不调用AI，直接返回提示）
+ */
+private AiSuggestionDTO createNoDataReport(String targetType, Long targetId, String reportType, String reason) {
+    String targetName = getTargetName(targetType, targetId);
+    String summary = generateNoDataSummary(targetType, reportType, targetName, reason);
+    
+    return AiSuggestionDTO.builder()
+        .summary(summary)
+        .strengths(new ArrayList<>())
+        .weaknesses(new ArrayList<>())
+        .suggestions(generateNoDataSuggestions(targetType, reportType))
+        .build();
+}
+
+/**
+ * 生成无数据时的摘要信息
+ */
+private String generateNoDataSummary(String targetType, String reportType, String targetName, String reason) {
+    switch (targetType) {
+        case "STUDENT":
+            if (reportType != null && reportType.startsWith("EXAM_ANALYSIS_")) {
+                return String.format("【%s】%s，暂时无法生成详细的考试成绩分析。请等待老师录入成绩后重试。", targetName, reason);
+            }
+            if (reportType != null && reportType.startsWith("HOMEWORK_ANALYSIS_")) {
+                return String.format("【%s】%s，暂时无法生成详细的作业分析。请先完成作业并等待老师批改。", targetName, reason);
+            }
+            if ("EXAM_OVERALL".equals(reportType)) {
+                return String.format("【%s】暂无任何考试成绩数据，暂时无法生成考试分析报告。请先参加考试。", targetName);
+            }
+            if ("HOMEWORK_OVERALL".equals(reportType)) {
+                return String.format("【%s】暂无任何已批改的作业数据，暂时无法生成作业分析报告。请先完成作业。", targetName);
+            }
+            if (reportType != null && reportType.startsWith("KNOWLEDGE_ANALYSIS")) {
+                return String.format("【%s】%s，暂时无法生成知识点分析报告。请先完成作业和考试。", targetName, reason);
+            }
+            return String.format("【%s】%s，暂时无法生成学习分析报告。请先完成更多学习活动。", targetName, reason);
+            
+        case "EXAM":
+            return String.format("【%s】%s，暂时无法生成考试分析报告。请先录入考试成绩。", targetName, reason);
+            
+        case "HOMEWORK":
+            return String.format("【%s】%s，暂时无法生成作业分析报告。请先录入作业成绩。", targetName, reason);
+            
+        case "CLASS":
+            return String.format("【%s】%s，暂时无法生成班级学情分析报告。请先录入考试或作业数据。", targetName, reason);
+            
+        case "COURSE":
+            return String.format("【%s】%s，暂时无法生成课程学情分析报告。请先录入成绩数据。", targetName, reason);
+            
+        default:
+            return String.format("【%s】数据不足，暂时无法生成分析报告。", targetName);
+    }
+}
+
+/**
+ * 生成无数据时的建议
+ */
+private List<String> generateNoDataSuggestions(String targetType, String reportType) {
+    List<String> suggestions = new ArrayList<>();
+    
+    if ("STUDENT".equals(targetType)) {
+        if (reportType != null && reportType.startsWith("EXAM_ANALYSIS_")) {
+            suggestions.add("1. 请耐心等待老师录入考试成绩");
+            suggestions.add("2. 成绩录入后将自动生成详细分析");
+        } else if (reportType != null && reportType.startsWith("HOMEWORK_ANALYSIS_")) {
+            suggestions.add("1. 请按时完成并提交作业");
+            suggestions.add("2. 等待老师批改后即可查看分析");
+        } else if ("HOMEWORK_OVERALL".equals(reportType)) {
+            suggestions.add("1. 请按时完成布置的作业");
+            suggestions.add("2. 作业批改后系统将自动生成分析报告");
+        } else if ("EXAM_OVERALL".equals(reportType)) {
+            suggestions.add("1. 请认真准备并参加考试");
+            suggestions.add("2. 考试成绩录入后将自动生成分析报告");
+        } else {
+            suggestions.add("1. 请按时完成作业并参加考试");
+            suggestions.add("2. 数据积累足够后系统将自动生成分析报告");
+        }
+    } else if ("EXAM".equals(targetType)) {
+        suggestions.add("1. 请通过「录入成绩」功能导入考试成绩");
+        suggestions.add("2. 成绩导入后将自动生成考试分析报告");
+    } else if ("HOMEWORK".equals(targetType)) {
+        suggestions.add("1. 请通过「录入成绩」功能导入作业成绩");
+        suggestions.add("2. 成绩导入后将自动生成作业分析报告");
+    } else if ("CLASS".equals(targetType)) {
+        suggestions.add("1. 请确保已录入考试成绩数据");
+        suggestions.add("2. 请确保已批改作业并录入成绩");
+        suggestions.add("3. 数据积累后系统将自动生成学情分析报告");
+    } else {
+        suggestions.add("1. 请确保已录入足够的学习数据");
+        suggestions.add("2. 数据积累后系统将自动生成分析报告");
+    }
+    
+    return suggestions;
+}
+
+
+
 }

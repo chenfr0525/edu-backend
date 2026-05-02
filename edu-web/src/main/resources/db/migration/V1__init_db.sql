@@ -100,7 +100,7 @@ CREATE TABLE `enrollment` (
     `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '选课ID',
     `student_id` BIGINT NOT NULL COMMENT '学生ID',
     `course_id` BIGINT NOT NULL COMMENT '课程ID',
-    `semester_id` BIGINT NOT NULL COMMENT '学期ID',
+    `semester_id` BIGINT COMMENT '学期ID',
     `progress` INT DEFAULT 0 COMMENT '学习进度(%)',
     `score` DECIMAL(5,2) DEFAULT NULL COMMENT '最终成绩',
     `status` VARCHAR(20) DEFAULT 'ONGOING' COMMENT '状态: ONGOING/COMPLETED/DROPPED',
@@ -226,7 +226,7 @@ CREATE TABLE `student_knowledge_mastery` (
     CONSTRAINT `fk_mastery_knowledge_point` FOREIGN KEY (`knowledge_point_id`) REFERENCES `knowledge_point` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学生知识点掌握度表';
 
--- 活动记录表（可用于生成假数据）
+-- 活动记录表
 CREATE TABLE `activity_record` (
     `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '记录ID',
     `student_id` BIGINT NOT NULL COMMENT '学生ID',

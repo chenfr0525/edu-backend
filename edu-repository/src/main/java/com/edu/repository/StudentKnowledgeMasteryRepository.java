@@ -20,6 +20,9 @@ public interface StudentKnowledgeMasteryRepository extends JpaRepository<Student
   void deleteByStudentId(Long studentId);
    // 查询某学生的所有知识点掌握情况
     List<StudentKnowledgeMastery> findByStudent(Student student);
+
+    // 查询某学生的所有知识点掌握情况
+    List<StudentKnowledgeMastery> findByStudentId(Long studentId);
     
     
     // 查询学生的薄弱知识点（掌握度低于阈值）

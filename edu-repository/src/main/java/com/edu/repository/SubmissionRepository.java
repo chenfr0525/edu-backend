@@ -71,11 +71,13 @@ List<Object[]> countKnowledgePointErrors(@Param("homeworkId") Long homeworkId);
      */
     @Query("SELECT s FROM Submission s WHERE s.homework.id = :homeworkId AND s.status = 'GRADED'")
     List<Submission> findGradedByHomeworkId(@Param("homeworkId") Long homeworkId);
+
+    
     
     /**
      * 获取学生所有已批改的作业提交
      */
-    @Query("SELECT s FROM Submission s WHERE s.student.id = :studentId AND s.status = 'GRADED' ORDER BY s.submittedAt DESC")
+    @Query("SELECT s FROM Submission s WHERE s.student.id = :studentId ORDER BY s.submittedAt DESC")
     List<Submission> findGradedByStudentId(@Param("studentId") Long studentId);
     
     /**

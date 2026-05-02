@@ -39,6 +39,9 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     @Query("SELECT AVG(e.classAvgScore) FROM Exam e WHERE e.classInfo.id = :classId")
     Double getClassAvgScore(@Param("classId") Long classId);
 
+    @Query("SELECT e FROM Exam e WHERE e.classInfo.id = :classId")
+    List<Exam> findByClassId(@Param("classId") Long classId);
+
      /**
      * 获取学生某学期的所有考试（通过班级和课程）
      */
