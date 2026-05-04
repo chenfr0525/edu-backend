@@ -50,6 +50,6 @@ public class KnowledgePointScoreDetailService {
     }
     
     public BigDecimal getStudentAverageScoreRate(Student student) {
-        return detailRepository.getStudentAvgScoreRate(student);
+        return detailRepository.getStudentAvgScoreRateByStudent(student);
     }
 }

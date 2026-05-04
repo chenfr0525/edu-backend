@@ -33,12 +33,9 @@ public class CourseAnalysisService {
     private final EnrollmentRepository enrollmentRepository;
     private final ExamGradeRepository examGradeRepository;
     private final HomeworkRepository homeworkRepository;
-    private final SubmissionRepository submissionRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
-    private final AiAnalysisReportRepository aiReportRepository;
     private final DeepSeekService deepSeekService;
-    private final ObjectMapper objectMapper;
     private final ExamRepository examRepository;
     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
@@ -358,17 +355,41 @@ public class CourseAnalysisService {
 
     public ParseResult parseKnowledgePointFile(String fileContent, String fileName, Long courseId) {
         Course course = courseRepository.findById(courseId)
-            .orElseThrow(() -> new RuntimeException("课程不存在"));
-        
+        .orElseThrow(() -> new RuntimeException("课程不存在"));
+    
         List<FieldMapping> mappings = getKnowledgePointFieldMappings();
         
+        // 1. AI解析文件
         ParseResult result = deepSeekService.parseFileData(fileContent, fileName, "知识点", mappings);
         
-        // 补充课程信息
+        // 2. 补充课程信息，并为每行数据匹配父知识点ID
         if (result.getData() != null) {
+            // 获取该课程下已有的知识点（用于匹配父知识点）
+            List<KnowledgePoint> existingKps = knowledgePointRepository.findByCourse(course);
+            Map<String, Long> nameToIdMap = existingKps.stream()
+                .collect(Collectors.toMap(
+                    KnowledgePoint::getName, 
+                    KnowledgePoint::getId,
+                    (existing, replacement) -> existing
+                ));
+            
             for (Map<String, Object> row : result.getData()) {
+                // 添加课程信息
                 row.put("courseId", courseId);
                 row.put("courseName", course.getName());
+            
+                // 匹配父知识点ID
+                String parentName = (String) row.get("parentName");
+                if (parentName != null && !parentName.trim().isEmpty()) {
+                    Long parentId = nameToIdMap.get(parentName);
+                    if (parentId != null) {
+                        row.put("parentId", parentId);
+                    } else {
+                        // 父知识点不存在，标记为待创建
+                        row.put("parentId", null);
+                        row.put("_parentNotFound", parentName);
+                    }
+                }
             }
         }
         
@@ -384,6 +405,7 @@ public class CourseAnalysisService {
     private List<FieldMapping> getKnowledgePointFieldMappings() {
         List<FieldMapping> mappings = new ArrayList<>();
         
+        // 知识点名称（必填）
         FieldMapping name = new FieldMapping();
         name.setTargetField("name");
         name.setFieldDescription("知识点名称");
@@ -392,6 +414,7 @@ public class CourseAnalysisService {
         name.setDataType("string");
         mappings.add(name);
         
+        // 描述（可选）
         FieldMapping description = new FieldMapping();
         description.setTargetField("description");
         description.setFieldDescription("知识点描述");
@@ -400,6 +423,7 @@ public class CourseAnalysisService {
         description.setDataType("string");
         mappings.add(description);
         
+        // 父知识点名称（可选）
         FieldMapping parentName = new FieldMapping();
         parentName.setTargetField("parentName");
         parentName.setFieldDescription("父知识点名称");
@@ -408,14 +432,7 @@ public class CourseAnalysisService {
         parentName.setDataType("string");
         mappings.add(parentName);
         
-        FieldMapping level = new FieldMapping();
-        level.setTargetField("level");
-        level.setFieldDescription("层级");
-        level.setPossibleNames(Arrays.asList("层级", "级别", "Level"));
-        level.setRequired(false);
-        level.setDataType("number");
-        mappings.add(level);
-        
+         // 排序（可选）
         FieldMapping sortOrder = new FieldMapping();
         sortOrder.setTargetField("sortOrder");
         sortOrder.setFieldDescription("排序");
@@ -443,18 +460,25 @@ public class CourseAnalysisService {
             nameToKpMap.put(kp.getName(), kp);
         }
         
-        for (Map<String, Object> row : data) {
+        for (int i = 0; i < data.size(); i++) {
+            Map<String, Object> row = data.get(i);
             try {
                 insertSingleKnowledgePoint(course, row, nameToKpMap);
                 successCount++;
+                log.info("成功导入知识点：{}", row.get("name"));
             } catch (Exception e) {
                 failCount++;
-                String errorMsg = String.format("导入失败 - 知识点：%s，原因：%s",
-                    row.get("name"), e.getMessage());
+                String errorMsg = String.format("第%d行 - 知识点：%s，原因：%s",
+                    i + 1, row.get("name"), e.getMessage());
                 log.error(errorMsg);
                 errors.add(errorMsg);
+                // 抛出异常触发回滚
+                throw new RuntimeException("知识点导入失败，已回滚所有数据：" + errorMsg);
             }
         }
+        
+        // 导入成功后，重新构建知识点树（更新parent关系）
+        rebuildKnowledgePointTree(courseId);
         
         return KnowledgePointImportResultVO.builder()
             .totalImported(data.size())
@@ -466,40 +490,70 @@ public class CourseAnalysisService {
             .build();
     }
 
+    /**
+     * 重新构建知识点树（确保父子关系正确）
+     */
+    private void rebuildKnowledgePointTree(Long courseId) {
+        // 获取该课程下所有知识点
+        List<KnowledgePoint> allKps = knowledgePointRepository.findByCourseId(courseId);
+        
+        // 按名称建立映射
+        Map<String, KnowledgePoint> nameMap = allKps.stream()
+            .collect(Collectors.toMap(KnowledgePoint::getName, kp -> kp, (a, b) -> a));
+    }
+
     private void insertSingleKnowledgePoint(Course course, Map<String, Object> row, 
                                               Map<String, KnowledgePoint> nameToKpMap) {
-        String name = (String) row.get("name");
+       String name = (String) row.get("name");
+        if (name == null || name.trim().isEmpty()) {
+            throw new RuntimeException("知识点名称不能为空");
+        }
         String description = (String) row.get("description");
         String parentName = (String) row.get("parentName");
-        Integer level = row.get("level") != null ? ((Number) row.get("level")).intValue() : 0;
         Integer sortOrder = row.get("sortOrder") != null ? ((Number) row.get("sortOrder")).intValue() : 0;
-        
-        // 查找父知识点
+         // 1. 获取父知识点（优先使用已匹配的parentId，否则通过名称查找）
         KnowledgePoint parent = null;
         if (parentName != null && !parentName.trim().isEmpty()) {
+            // 先从已创建的知识点映射中查找
             parent = nameToKpMap.get(parentName);
+            
+            // 如果没找到，尝试从数据库查找
             if (parent == null) {
-                // 尝试创建父知识点
-                parent = new KnowledgePoint();
-                parent.setName(parentName);
-                parent.setCourse(course);
-                parent.setLevel(level - 1);
-                parent.setSortOrder(0);
-                parent = knowledgePointRepository.save(parent);
-                nameToKpMap.put(parentName, parent);
+                Optional<KnowledgePoint> parentOpt = knowledgePointRepository.findByNameAndCourse(parentName, course);
+                if (parentOpt.isPresent()) {
+                    parent = parentOpt.get();
+                    nameToKpMap.put(parentName, parent);
+                } else {
+                    // 父知识点不存在，自动创建
+                    log.info("父知识点 '{}' 不存在，自动创建", parentName);
+                    parent = new KnowledgePoint();
+                    parent.setName(parentName);
+                    parent.setCourse(course);
+                    parent.setSortOrder(0);
+                    parent = knowledgePointRepository.save(parent);
+                    nameToKpMap.put(parentName, parent);
+                }
             }
         }
+
+        // 2. 检查知识点是否已存在
+        Optional<KnowledgePoint> existing = knowledgePointRepository.findByNameAndCourse(name, course);
+        if (existing.isPresent()) {
+            throw new RuntimeException("知识点 '" + name + "' 在当前课程中已存在");
+        }
         
+        // 3. 创建知识点
         KnowledgePoint kp = new KnowledgePoint();
         kp.setName(name);
         kp.setDescription(description);
         kp.setCourse(course);
         kp.setParent(parent);
-        kp.setLevel(level);
         kp.setSortOrder(sortOrder);
         
         knowledgePointRepository.save(kp);
         nameToKpMap.put(name, kp);
+        
+        log.info("知识点插入成功 - 名称：{}，父知识点：{}", name, parentName);
     }
 
     // ==================== 7. 知识点详情分析 ====================

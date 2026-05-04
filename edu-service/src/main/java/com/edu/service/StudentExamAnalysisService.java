@@ -27,6 +27,7 @@ import com.edu.domain.Course;
 import com.edu.domain.Exam;
 import com.edu.domain.ExamGrade;
 import com.edu.domain.KnowledgePoint;
+import com.edu.domain.KnowledgePointScoreDetail;
 import com.edu.domain.Semester;
 import com.edu.domain.Student;
 import com.edu.domain.dto.AiSuggestionDTO;
@@ -43,6 +44,7 @@ import com.edu.domain.dto.StudentExamDetailDTO;
 import com.edu.repository.ExamGradeRepository;
 import com.edu.repository.ExamRepository;
 import com.edu.repository.KnowledgePointRepository;
+import com.edu.repository.KnowledgePointScoreDetailRepository;
 
 @Service
 @RequiredArgsConstructor
@@ -54,6 +56,7 @@ public class StudentExamAnalysisService {
     private final CourseService courseService;
     private final KnowledgePointRepository knowledgePointRepository;
     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
+    private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
 
      /**
      * 获取或创建考试AI建议（迁移到统一服务）
@@ -342,10 +345,7 @@ public class StudentExamAnalysisService {
             info.setGradeId(g.getId());
             info.setScore(g.getScore());
             info.setRemark(g.getRemark());
-            info.setClassRank(g.getClassRank());
-            info.setGradeRank(g.getGradeRank());
             info.setScoreTrend(g.getScoreTrend());
-            info.setKnowledgePointScores(parseKnowledgePointScores(g.getKnowledgePointScores()));
             info.setCreatedAt(g.getCreatedAt());
         }
         return info;
@@ -387,84 +387,78 @@ public class StudentExamAnalysisService {
     }
     
    private List<ExamKnowledgePointDTO> getExamKnowledgePointAnalysis(Long studentId, Exam exam) {
-    List<ExamKnowledgePointDTO> result = new ArrayList<>();
+        List<ExamKnowledgePointDTO> result = new ArrayList<>();
     
-    // 1. 参数校验
-    if (studentId == null || exam == null) {
-        log.warn("参数为空: studentId={}, exam={}", studentId, exam);
-        return result;
-    }
-    
-    // 2. 查询成绩
-    Optional<ExamGrade> grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), studentId);
-    if (!grade.isPresent()) {
-        log.warn("未找到考试成绩: examId={}, studentId={}", exam.getId(), studentId);
-        return result;
-    }
-    
-    String knowledgePointScores = grade.get().getKnowledgePointScores();
-    if (knowledgePointScores == null || knowledgePointScores.trim().isEmpty()) {
-        log.warn("知识点分数为空: examId={}, studentId={}", exam.getId(), studentId);
-        return result;
-    }
-    
-    // 3. 解析知识点分数
-    Map<String, Integer> myKpScores = parseKnowledgePointScores(knowledgePointScores);
-    if (myKpScores == null || myKpScores.isEmpty()) {
-        log.warn("解析知识点分数失败: {}", knowledgePointScores);
-        return result;
-    }
-    
-    // 4. 获取班级平均分
-    Map<String, BigDecimal> classAvgRates = calculateExamClassAvgRates(exam);
-    if (classAvgRates == null) {
-        classAvgRates = new HashMap<>();
-    }
-    
-    // 5. 遍历处理
-    for (Map.Entry<String, Integer> entry : myKpScores.entrySet()) {
-        String kpId = entry.getKey();
-        Integer myScore = entry.getValue();
-        
-        // 跳过无效数据
-        if (kpId == null || myScore == null) {
-            continue;
+        // 参数校验
+        if (studentId == null || exam == null) {
+            log.warn("参数为空: studentId={}, exam={}", studentId, exam);
+            return result;
         }
         
-        try {
-            Long kpIdLong = Long.parseLong(kpId);
-            String kpName = getKnowledgePointName(kpIdLong);
+        // 1. 获取考试关联的知识点ID列表
+        List<Long> knowledgePointIds = exam.getKnowledgePointIds();
+        if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
+            log.warn("考试 {} 未关联知识点", exam.getId());
+            return result;
+        }
+        
+        // 2. 获取知识点信息
+        List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
+    
+        // 3. 获取班级ID（用于计算班级平均分）
+        Long classId = null;
+        if (exam.getClassInfo() != null) {
+            classId = exam.getClassInfo().getId();
+        }
 
-            double myRate = myScore * 10.0; 
-            
-            BigDecimal classAvg = classAvgRates.getOrDefault(kpId, BigDecimal.ZERO);
-            String level;
-            String suggestion;
-                if (myRate >= 80) {
-                level="GOOD";
-                suggestion="✅ 掌握良好，继续保持";
-                } else if (myRate >= 60) {
-                level="MODERATE";
-                suggestion="📚 基本掌握，建议加强练习";
-                } else {
-                level="WEAK";
-                suggestion="🔴 薄弱知识点，需要重点复习";
-            }
+         // 4. 遍历知识点，从 knowledge_point_score_detail 获取数据
+    for (KnowledgePoint kp : kps) {
+        // 4.1 获取该学生在本次考试中该知识点的得分率
+        List<KnowledgePointScoreDetail> details = kpScoreDetailRepository
+            .findBySourceTypeAndSourceIdAndKnowledgePointId("EXAM", exam.getId(), kp.getId());
         
-            ExamKnowledgePointDTO dto = ExamKnowledgePointDTO.builder()
-                .knowledgePointId(kpIdLong).knowledgePointName(kpName != null ? kpName : "知识点-" + kpId)
-                .myScore(myScore)
-                .fullScore(10)  // fullScore 是 Integer 类型，直接传 10
-                .scoreRate(BigDecimal.valueOf(myRate).setScale(2, RoundingMode.HALF_UP))
-                .classAvgRate(classAvg)  // classAvg 是 BigDecimal 类型
-                .level(level)
-                .suggestion(suggestion) // 根据得分率计算
-                .build();
-            
-            result.add(dto);
-        } catch (NumberFormatException e) {
-            log.error("知识点ID解析失败: {}", kpId, e);
+        // 过滤出当前学生的记录
+        BigDecimal myRate = BigDecimal.ZERO;
+        for (KnowledgePointScoreDetail detail : details) {
+            if (detail.getStudent().getId().equals(studentId)) {
+                myRate = detail.getScoreRate();
+                break;
+            }
         }
+   // 4.2 获取班级平均得分率
+        BigDecimal classAvgRate = BigDecimal.ZERO;
+        if (classId != null) {
+            classAvgRate = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
+            if (classAvgRate == null) classAvgRate = BigDecimal.ZERO;
+        }
+        
+        // 4.3 计算等级和建议（基于得分率）
+        double myRateValue = myRate.doubleValue();
+        String level;
+        String suggestion;
+        if (myRateValue >= 80) {
+            level = "GOOD";
+            suggestion = "✅ 掌握良好，继续保持";
+        } else if (myRateValue >= 60) {
+            level = "MODERATE";
+            suggestion = "📚 基本掌握，建议加强练习";
+        } else {
+            level = "WEAK";
+            suggestion = "🔴 薄弱知识点，需要重点复习";
+        }
+    // 4.4 构建 DTO
+        ExamKnowledgePointDTO dto = ExamKnowledgePointDTO.builder()
+            .knowledgePointId(kp.getId())
+            .knowledgePointName(kp.getName())
+            .fullScore(10)  // 10分制
+            .myScore((int) (myRateValue / 10))  // 百分制转10分制
+            .scoreRate(myRate)
+            .classAvgRate(classAvgRate)
+            .level(level)
+            .suggestion(suggestion)
+            .build();
+        
+        result.add(dto);
     }
     
     // 6. 排序（处理 null 值）
@@ -485,12 +479,20 @@ public class StudentExamAnalysisService {
         return analysis;
     }
     
-    ExamGrade g = grade.get();
+     ExamGrade g = grade.get();
     analysis.setMyScore(g.getScore());
     analysis.setClassAvg(exam.getClassAvgScore() != null ? exam.getClassAvgScore() : BigDecimal.ZERO);
     analysis.setDiffFromAvg(g.getScore() - (exam.getClassAvgScore() != null ? exam.getClassAvgScore().intValue() : 0));
     analysis.setTrend(g.getScoreTrend() != null ? g.getScoreTrend() : "STABLE");
-    analysis.setRank(g.getClassRank());
+    List<ExamGrade> allScores = examGradeRepository.findByExamOrderByScoreDesc(exam);
+    int rank = 1;
+    for (int i = 0; i < allScores.size(); i++) {
+        if (allScores.get(i).getStudent().getId().equals(studentId)) {
+            rank = i + 1;
+            break;
+        }
+    }
+    analysis.setRank(rank);
     
     // 1. 创建 ScoreDistributionDTO 并初始化所有计数为 0
     ScoreDistributionDTO distribution = new ScoreDistributionDTO();
@@ -545,53 +547,4 @@ public class StudentExamAnalysisService {
     
     return analysis;
 }
-    private Map<String, BigDecimal> calculateExamClassAvgRates(Exam exam) {
-        Map<String, BigDecimal> avgRates = new HashMap<>();
-        List<ExamGrade> grades = examGradeRepository.findByExam(exam);
-        
-        if (grades.isEmpty()) return avgRates;
-        
-        Map<String, List<Integer>> kpScores = new HashMap<>();
-        
-        for (ExamGrade g : grades) {
-            Map<String, Integer> scores = parseKnowledgePointScores(g.getKnowledgePointScores());
-            for (Map.Entry<String, Integer> entry : scores.entrySet()) {
-                kpScores.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
-            }
-        }
-        
-        for (Map.Entry<String, List<Integer>> entry : kpScores.entrySet()) {
-            double avg = entry.getValue().stream().mapToInt(Integer::intValue).average().orElse(0);
-            avgRates.put(entry.getKey(), BigDecimal.valueOf(avg * 10).setScale(2, RoundingMode.HALF_UP));
-        }
-        
-        return avgRates;
-    }
-    
-    private Map<String, Integer> parseKnowledgePointScores(String json) {
-        Map<String, Integer> result = new HashMap<>();
-        if (json == null || json.isEmpty()) return result;
-        
-        try {
-            String cleaned = json.replace("{", "").replace("}", "").replace("\"", "");
-            String[] pairs = cleaned.split(",");
-            for (String pair : pairs) {
-                String[] kv = pair.split(":");
-                if (kv.length == 2) {
-                    result.put(kv[0].trim(), Integer.parseInt(kv[1].trim()));
-                }
-            }
-        } catch (Exception e) {
-            log.error("解析知识点得分失败: {}", json, e);
-        }
-        return result;
-    }
-    
-    private String getKnowledgePointName(Long kpId) {
-        Optional<KnowledgePoint> knowledgePoint = knowledgePointRepository.findById(kpId);
-        if (knowledgePoint.isPresent()) {
-            return knowledgePoint.get().getName();
-        }
-        return "知识点" + kpId;
-    }
 }

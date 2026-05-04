@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -14,14 +13,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
-
-import com.alibaba.fastjson.JSONObject;
-import com.edu.domain.AiAnalysisReport;
 import com.edu.domain.Course;
 import com.edu.domain.ErrorRecord;
 import com.edu.domain.KnowledgePoint;
 import com.edu.domain.KnowledgePointScoreDetail;
-import com.edu.domain.Semester;
 import com.edu.domain.Student;
 import com.edu.domain.StudentKnowledgeMastery;
 import com.edu.domain.dto.AiSuggestionDTO;
@@ -36,8 +31,6 @@ import com.edu.domain.dto.KnowledgePointTrendDTO;
 import com.edu.repository.ErrorRecordRepository;
 import com.edu.repository.KnowledgePointScoreDetailRepository;
 import com.edu.repository.StudentKnowledgeMasteryRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.stream.Collectors;
 
@@ -82,75 +75,91 @@ public class StudentKnowledgeAnalysisService {
         return result;
     }
     
-    /**
-     * 2. 获取知识点统计卡片
-     */
-    public KnowledgePointStatisticsCardsDTO getStatisticsCards(Long studentId) {
-        Student student = studentService.findById(studentId)
-                .orElseThrow(() -> new RuntimeException("学生不存在"));
-        
-        KnowledgePointStatisticsCardsDTO cards = new KnowledgePointStatisticsCardsDTO();
-        
-        List<StudentKnowledgeMastery> masteries = masteryRepository.findAllByStudentId(studentId);
-        
-        if (masteries.isEmpty()) {
-            cards.setOverallMasteryRate(BigDecimal.ZERO);
-            cards.setTotalKnowledgePoints(0);
-            cards.setWeakKnowledgePoints(0);
-            cards.setStrongKnowledgePoints(0);
-            return cards;
-        }
-        
-        double avgMastery = masteries.stream()
-                .mapToDouble(StudentKnowledgeMastery::getMasteryLevel)
-                .average()
-                .orElse(0);
-        cards.setOverallMasteryRate(BigDecimal.valueOf(avgMastery).setScale(2, RoundingMode.HALF_UP));
-        
-        cards.setTotalKnowledgePoints(masteries.size());
-        
-        long weakCount = masteries.stream()
-                .filter(m -> m.getMasteryLevel() < 60)
-                .count();
-        cards.setWeakKnowledgePoints((int) weakCount);
-        
-        long strongCount = masteries.stream()
-                .filter(m -> m.getMasteryLevel() >= 80)
-                .count();
-        cards.setStrongKnowledgePoints((int) strongCount);
-        
-        Map<Long, Double> courseAvgMastery = new HashMap<>();
-        for (StudentKnowledgeMastery m : masteries) {
-            Long courseId = m.getKnowledgePoint().getCourse().getId();
-            courseAvgMastery.merge(courseId, m.getMasteryLevel(), Double::sum);
-        }
-        
-        Map<Long, Double> courseFinalAvg = new HashMap<>();
-        for (Map.Entry<Long, Double> entry : courseAvgMastery.entrySet()) {
-            Long courseId = entry.getKey();
-            int count = (int) masteries.stream()
-                    .filter(m -> m.getKnowledgePoint().getCourse().getId().equals(courseId))
-                    .count();
-            courseFinalAvg.put(courseId, entry.getValue() / count);
-        }
-        
-        Optional<Map.Entry<Long, Double>> best = courseFinalAvg.entrySet().stream()
-                .max(Map.Entry.comparingByValue());
-        Optional<Map.Entry<Long, Double>> worst = courseFinalAvg.entrySet().stream()
-                .min(Map.Entry.comparingByValue());
-        
-        if (best.isPresent()) {
-            Course bestCourse = courseService.findById(best.get().getKey()).orElse(null);
-            cards.setBestCourse(bestCourse != null ? bestCourse.getName() : "未知");
-        }
-        if (worst.isPresent()) {
-            Course worstCourse = courseService.findById(worst.get().getKey()).orElse(null);
-            cards.setWeakestCourse(worstCourse != null ? worstCourse.getName() : "未知");
-        }
-        
+   /**
+ * 2. 获取知识点统计卡片
+ */
+public KnowledgePointStatisticsCardsDTO getStatisticsCards(Long studentId) {
+    Student student = studentService.findById(studentId)
+        .orElseThrow(() -> new RuntimeException("学生不存在"));
+
+    KnowledgePointStatisticsCardsDTO cards = new KnowledgePointStatisticsCardsDTO();
+
+    // ✅ 1. 从 knowledge_point_score_detail 获取所有知识点最新得分
+    List<KnowledgePointScoreDetail> details = kpScoreDetailRepository.findAllLatestByStudentId(studentId);
+
+    if (details.isEmpty()) {
+        cards.setOverallMasteryRate(BigDecimal.ZERO);
+        cards.setTotalKnowledgePoints(0);
+        cards.setWeakKnowledgePoints(0);
+        cards.setStrongKnowledgePoints(0);
+        cards.setBestCourse("暂无");
+        cards.setWeakestCourse("暂无");
         return cards;
     }
+
+    // ✅ 2. 计算平均掌握度
+    double avgMastery = details.stream()
+            .mapToDouble(d -> d.getScoreRate().doubleValue())
+            .average()
+            .orElse(0);
+    cards.setOverallMasteryRate(BigDecimal.valueOf(avgMastery).setScale(2, RoundingMode.HALF_UP));
+
+    // ✅ 3. 统计总数
+    cards.setTotalKnowledgePoints(details.size());
+
+    // ✅ 4. 统计薄弱和优势知识点
+    long weakCount = details.stream()
+            .filter(d -> d.getScoreRate().doubleValue() < 60)
+            .count();
+    long strongCount = details.stream()
+            .filter(d -> d.getScoreRate().doubleValue() >= 80)
+            .count();
+
+    cards.setWeakKnowledgePoints((int) weakCount);
+    cards.setStrongKnowledgePoints((int) strongCount);
+
+    // ✅ 5. 按课程分组统计平均掌握度（使用 KnowledgePointScoreDetail）
+    Map<Long, List<Double>> courseScoresMap = new HashMap<>();
     
+    for (KnowledgePointScoreDetail detail : details) {
+        Long courseId = detail.getKnowledgePoint().getCourse().getId();
+        double scoreRate = detail.getScoreRate().doubleValue();
+        
+        courseScoresMap.computeIfAbsent(courseId, k -> new ArrayList<>()).add(scoreRate);
+    }
+    
+    // 计算每个课程的平均掌握度
+    Map<Long, Double> courseAvgMastery = new HashMap<>();
+    for (Map.Entry<Long, List<Double>> entry : courseScoresMap.entrySet()) {
+        double courseAvg = entry.getValue().stream()
+                .mapToDouble(Double::doubleValue)
+                .average()
+                .orElse(0);
+        courseAvgMastery.put(entry.getKey(), courseAvg);
+    }
+    
+    // ✅ 6. 找出最佳和最弱课程
+    Optional<Map.Entry<Long, Double>> best = courseAvgMastery.entrySet().stream()
+            .max(Map.Entry.comparingByValue());
+    Optional<Map.Entry<Long, Double>> worst = courseAvgMastery.entrySet().stream()
+            .min(Map.Entry.comparingByValue());
+
+    if (best.isPresent()) {
+        Course bestCourse = courseService.findById(best.get().getKey()).orElse(null);
+        cards.setBestCourse(bestCourse != null ? bestCourse.getName() : "未知");
+    } else {
+        cards.setBestCourse("暂无");
+    }
+    
+    if (worst.isPresent()) {
+        Course worstCourse = courseService.findById(worst.get().getKey()).orElse(null);
+        cards.setWeakestCourse(worstCourse != null ? worstCourse.getName() : "未知");
+    } else {
+        cards.setWeakestCourse("暂无");
+    }
+
+    return cards;
+}
     /**
      * 3. 获取知识点掌握进度（环图数据）
      */
@@ -234,7 +243,7 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
     Student student = studentService.findById(studentId)
             .orElseThrow(() -> new RuntimeException("学生不存在"));
 
-         if (courseId == null || courseId == 0) {
+    if (courseId == null || courseId == 0) {
         KnowledgePointRadarDTO empty = new KnowledgePointRadarDTO();
         empty.setIndicators(new ArrayList<>());
         empty.setMyValues(new ArrayList<>());
@@ -244,35 +253,32 @@ public KnowledgePointRadarDTO getKnowledgePointRadar(Long studentId, Long course
     
     Course course = courseService.findById(courseId)
             .orElseThrow(() -> new RuntimeException("课程不存在"));
-        
-       List<KnowledgePoint> knowledgePoints = knowledgePointService.findByCourse(course);
+    
+    List<KnowledgePoint> knowledgePoints = knowledgePointService.findByCourse(course);
     
     List<String> indicators = new ArrayList<>();
     List<BigDecimal> myValues = new ArrayList<>();
     List<BigDecimal> classAvgValues = new ArrayList<>();
-        
-        Long classId = student.getClassInfo() != null ? student.getClassInfo().getId() : null;
+    
+    Long classId = student.getClassInfo() != null ? student.getClassInfo().getId() : null;
     
     for (KnowledgePoint kp : knowledgePoints) {
         indicators.add(kp.getName());
-            
-            // 获取学生自己的掌握度（从 student_knowledge_mastery）
-        Optional<StudentKnowledgeMastery> mastery = masteryService.findByStudentAndKnowledgePoint(student, kp);
-        if (mastery.isPresent()) {
-            myValues.add(BigDecimal.valueOf(mastery.get().getMasteryLevel()).setScale(2, RoundingMode.HALF_UP));
-        } else {
-            myValues.add(BigDecimal.ZERO);
-        }
-            if (classId != null) {
-            // 使用 kpScoreDetailRepository 计算班级平均得分率
+        
+        // ✅ 从 knowledge_point_score_detail 获取学生平均掌握度
+        BigDecimal myAvg = kpScoreDetailRepository.getStudentAvgScoreRate(studentId, kp.getId());
+        myValues.add(myAvg != null ? myAvg : BigDecimal.ZERO);
+        
+        // ✅ 从 knowledge_point_score_detail 获取班级平均掌握度
+        if (classId != null) {
             BigDecimal classAvg = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-            classAvgValues.add(classAvg != null ? classAvg.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+            classAvgValues.add(classAvg != null ? classAvg : BigDecimal.ZERO);
         } else {
             classAvgValues.add(BigDecimal.ZERO);
         }
     }
-        
-       KnowledgePointRadarDTO radar = new KnowledgePointRadarDTO();
+    
+    KnowledgePointRadarDTO radar = new KnowledgePointRadarDTO();
     radar.setIndicators(indicators);
     radar.setMyValues(myValues);
     radar.setClassAvgValues(classAvgValues);

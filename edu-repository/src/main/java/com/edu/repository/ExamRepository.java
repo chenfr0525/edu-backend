@@ -121,4 +121,19 @@ Page<Exam> findByCourseIdAndKeyword(@Param("courseId") Long courseId,
  */
 List<Exam> findByCourseId(Long courseId);
 
+ /**
+     * 查找同课程且考试日期在当前之前的考试（用于成绩对比分析）
+     * @param course 课程对象
+     * @param examDate 当前考试的日期
+     * @return 同一课程在指定日期之前的所有考试，按考试日期降序排列
+     */
+    @Query("SELECT e FROM Exam e " +
+           "WHERE e.course = :course " +
+           "AND e.examDate < :examDate " +
+           "AND e.status = 'COMPLETED' " +
+           "ORDER BY e.examDate DESC")
+    List<Exam> findByCourseAndExamDateBefore(@Param("course") Course course,
+                                              @Param("examDate") LocalDateTime examDate);
+
+
 }

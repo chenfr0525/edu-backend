@@ -1,7 +1,6 @@
 package com.edu.service;
 
 import lombok.RequiredArgsConstructor;
-import lombok.var;
 import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
@@ -9,18 +8,12 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
-import java.util.HashMap;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.edu.domain.AiAnalysisReport;
 import com.edu.domain.Course;
 import com.edu.domain.CourseStatus;
 import com.edu.domain.Enrollment;
@@ -30,24 +23,21 @@ import com.edu.domain.ExamStatus;
 import com.edu.domain.KnowledgePoint;
 import com.edu.domain.KnowledgePointScoreDetail;
 import com.edu.domain.Role;
-import com.edu.domain.Semester;
 import com.edu.domain.Student;
 import com.edu.domain.StudentKnowledgeMastery;
 import com.edu.domain.User;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.ExamGradeImportResult;
 import com.edu.domain.dto.FieldMapping;
+import com.edu.domain.dto.ParseResult;
 import com.edu.domain.dto.ValidationError;
 import com.edu.repository.ExamGradeRepository;
 import com.edu.repository.ExamRepository;
 import com.edu.repository.StudentRepository;
 import com.edu.repository.UserRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.edu.repository.KnowledgePointRepository;
 import com.edu.repository.KnowledgePointScoreDetailRepository;
-import com.edu.repository.SemesterRepository;
 import com.edu.repository.StudentKnowledgeMasteryRepository;
-import com.edu.repository.AiAnalysisReportRepository;
 import com.edu.repository.EnrollmentRepository;
 
 @Service
@@ -61,13 +51,132 @@ public class ExamGradeImportValidator {
     private final StudentRepository studentRepository;
     private final KnowledgePointRepository knowledgePointRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
-    private final AiAnalysisReportRepository aiReportRepository;
     private final UserRepository userRepository;
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final ActivitySyncService activitySyncService;
     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
+ /**
+     * 获取考试成绩解析阶段字段映射（用于AI解析Excel文件）
+     * 字段名：用户友好的名称（学生姓名）
+     */
+    public List<FieldMapping> getExamGradeParseFieldMappings() {
+        List<FieldMapping> mappings = new ArrayList<>();
+        
+        // 学生（必填，可用学号或姓名）
+        FieldMapping studentName = new FieldMapping();
+        studentName.setTargetField("studentName");
+        studentName.setFieldDescription("学生姓名或学号");
+        studentName.setPossibleNames(Arrays.asList("学生", "学生姓名", "姓名", "学号", "Student", "Student Name", "StudentNo"));
+        studentName.setRequired(true);
+        studentName.setDataType("string");
+        studentName.setNeedExist(true);
+        mappings.add(studentName);
+        
+        // 成绩（必填）
+        FieldMapping score = new FieldMapping();
+        score.setTargetField("score");
+        score.setFieldDescription("考试得分");
+        score.setPossibleNames(Arrays.asList("成绩", "分数", "得分", "Score"));
+        score.setRequired(true);
+        score.setDataType("number");
+        mappings.add(score);
+        
+        // 备注（可选）
+        FieldMapping remark = new FieldMapping();
+        remark.setTargetField("remark");
+        remark.setFieldDescription("备注");
+        remark.setPossibleNames(Arrays.asList("备注", "评语", "Remark", "Comment"));
+        remark.setRequired(false);
+        remark.setDataType("string");
+        mappings.add(remark);
+        
+        return mappings;
+    }
+
+    /**
+     * 获取考试成绩导入阶段字段映射（用于验证前端传来的数据）
+     * 字段名：代码中使用的字段名
+     */
+    public List<FieldMapping> getExamGradeImportFieldMappings() {
+        List<FieldMapping> mappings = new ArrayList<>();
+        
+        // 学生（必填）
+        FieldMapping studentName = new FieldMapping();
+        studentName.setTargetField("studentName");
+        studentName.setFieldDescription("学生姓名或学号");
+        studentName.setPossibleNames(Arrays.asList("studentName", "学生"));
+        studentName.setRequired(true);
+        studentName.setDataType("string");
+        studentName.setNeedExist(true);
+        mappings.add(studentName);
+        
+        // 成绩（必填）
+        FieldMapping score = new FieldMapping();
+        score.setTargetField("score");
+        score.setFieldDescription("考试得分");
+        score.setPossibleNames(Arrays.asList("score", "成绩"));
+        score.setRequired(true);
+        score.setDataType("number");
+        mappings.add(score);
+        
+        // 备注（可选）
+        FieldMapping remark = new FieldMapping();
+        remark.setTargetField("remark");
+        remark.setFieldDescription("备注");
+        remark.setPossibleNames(Arrays.asList("remark", "备注"));
+        remark.setRequired(false);
+        remark.setDataType("string");
+        mappings.add(remark);
+        
+        return mappings;
+    }
+    
+    /**
+     * AI解析考试成绩文件后，自动将学生名称转换为ID
+     */
+    public ParseResult parseAndConvertExamGradeFile(String fileContent, String fileName) {
+        // 1. 获取解析阶段的字段映射
+        List<FieldMapping> mappings = getExamGradeParseFieldMappings();
+        
+        // 2. AI解析文件
+        ParseResult result = deepSeekService.parseFileData(fileContent, fileName, "exam_grade", mappings);
+        
+        // 3. 解析成功后，自动转换学生名称到ID
+        if (result.isSuccess() && result.getData() != null && !result.getData().isEmpty()) {
+            convertExamGradeParseResultToIds(result);
+        }
+        
+        return result;
+    }
+
+    /**
+     * 将考试成绩解析结果中的学生名称转换为ID
+     */
+    private void convertExamGradeParseResultToIds(ParseResult result) {
+        List<Map<String, Object>> data = result.getData();
+        
+        for (Map<String, Object> row : data) {
+            String studentIdentifier = (String) row.get("studentName");
+            if (studentIdentifier != null && !studentIdentifier.isEmpty()) {
+                Student student = findStudentByIdentifier(studentIdentifier);
+                if (student != null) {
+                    row.put("studentId", student.getId());
+                    row.put("studentNo", student.getStudentNo());
+                    // 获取学生姓名用于显示
+                    if (student.getUser() != null) {
+                        row.put("studentDisplayName", student.getUser().getName());
+                    }
+                } else {
+                    row.put("studentId", null);
+                    row.put("_error_studentName", "学生不存在: " + studentIdentifier);
+                }
+            }
+        }
+    }
+    
+    
     /**
      * 确认导入考试成绩
      * @param examId 考试ID
@@ -79,8 +188,9 @@ public class ExamGradeImportValidator {
         Exam exam = examRepository.findById(examId)
             .orElseThrow(() -> new RuntimeException("考试不存在"));
 
-        List<FieldMapping> mappings = getExamGradeFieldMappings();
+        List<FieldMapping> mappings = getExamGradeImportFieldMappings();
 
+        // 1. 验证数据
         List<ValidationError> errors = deepSeekService.validateData(data, mappings);
         if (!errors.isEmpty()) {
             log.error("数据验证失败：{}", errors);
@@ -91,42 +201,52 @@ public class ExamGradeImportValidator {
                 .build();
         }
 
+        // 2. 批量导入成绩
         int successCount = 0;
         int failCount = 0;
         int updateCount = 0;
         List<ExamGrade> savedGrades = new ArrayList<>();
         StringBuilder resultMsg = new StringBuilder();
 
-        for (Map<String, Object> row : data) {
+         for (int i = 0; i < data.size(); i++) {
+            Map<String, Object> row = data.get(i);
             try {
                 ExamGrade grade = insertOrUpdateExamGrade(exam, row);
                 savedGrades.add(grade);
                 successCount++;
+                
                 if (examGradeRepository.findByExamIdAndStudentId(examId, grade.getStudent().getId()).isPresent()) {
                     updateCount++;
                 }
-                log.info("成功导入成绩 - 学生：{}，成绩：{}", row.get("studentName"), row.get("score"));
+                
+                log.info("成功导入成绩 - 第{}行，学生：{}，成绩：{}", 
+                    i + 1, row.get("studentName"), row.get("score"));
             } catch (Exception e) {
                 failCount++;
-                String errorMsg = String.format("导入失败 - 学生：%s，原因：%s",
-                    row.get("studentName"), e.getMessage());
+                String errorMsg = String.format("第%d行 - 学生：%s，原因：%s",
+                    i + 1, row.get("studentName"), e.getMessage());
                 log.error(errorMsg);
                 resultMsg.append(errorMsg).append("\n");
+                throw new RuntimeException("成绩导入失败，已回滚所有数据：" + errorMsg);
             }
         }
-
-         // 更新考试统计数据
+          // 3. 更新考试统计数据
         updateExamStatistics(exam);
 
-        // 处理知识点掌握度（触发AI分析）
+        // 4. 处理知识点掌握度并触发AI分析
         boolean aiCompleted = processExamGradesAndUpdateMastery(exam, savedGrades);
 
+        boolean allSuccess = failCount == 0;
         String summary = String.format("导入完成！成功：%d条（新增%d条，更新%d条），失败：%d条", 
             successCount, successCount - updateCount, updateCount, failCount);
+        
+        if (failCount > 0) {
+            summary = summary + "\n" + resultMsg.toString();
+        }
         log.info(summary);
 
-        return ExamGradeImportResult.builder()
-            .success(failCount == 0)
+       return ExamGradeImportResult.builder()
+            .success(allSuccess)
             .successCount(successCount)
             .failCount(failCount)
             .updateCount(updateCount)
@@ -136,12 +256,11 @@ public class ExamGradeImportValidator {
             .build();
     }
 
-     /**
-     * 处理考试成绩并更新知识点掌握度（迁移到统一服务）
+   /**
+     * 处理考试成绩并更新知识点掌握度
      */
     private boolean processExamGradesAndUpdateMastery(Exam exam, List<ExamGrade> grades) {
         try {
-            // 获取考试关联的知识点ID列表
             List<Long> knowledgePointIds = exam.getKnowledgePointIds();
             
             if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
@@ -155,28 +274,26 @@ public class ExamGradeImportValidator {
                 return false;
             }
 
-            // 1. 更新学生知识点掌握度（原有逻辑保留）
             for (ExamGrade grade : grades) {
                 Student student = grade.getStudent();
                 Double scoreRate = (grade.getScore() != null && exam.getFullScore() != null && exam.getFullScore() > 0)
                     ? grade.getScore().doubleValue() / exam.getFullScore() * 100
                     : (grade.getScore() != null ? grade.getScore().doubleValue() : 0);
                 
-                // 自动创建选课记录
                 ensureEnrollment(student, exam.getCourse());
                 
-               for (KnowledgePoint kp : kps) {
+                for (KnowledgePoint kp : kps) {
                     updateStudentMastery(student, kp, scoreRate);
                     saveKnowledgePointScoreDetail(student, kp, "EXAM", exam.getId(), scoreRate);
                 }
             }
-            // 2. 使用统一服务生成AI分析报告（自动保存）
-            // 注意：这里不需要手动保存，统一服务会自动处理
+            
+            // 使用统一服务生成AI分析报告
             AiSuggestionDTO aiResult = unifiedAiAnalysisService.getOrCreateAnalysis(
-                "EXAM",           // targetType: 考试类型
-                exam.getId(),     // targetId: 考试ID
-                "EXAM_ANALYSIS",  // reportType: 考试分析
-                true              // 强制刷新（因为刚导入新数据）
+                "EXAM",
+                exam.getId(),
+                "EXAM_ANALYSIS",
+                true
             );
             
             log.info("考试成绩AI分析完成，考试ID: {}, 摘要: {}", exam.getId(), 
@@ -189,10 +306,7 @@ public class ExamGradeImportValidator {
             return false;
         }
     }
-
-
-
-   /**
+  /**
      * 插入或更新单条考试成绩
      */
     private ExamGrade insertOrUpdateExamGrade(Exam exam, Map<String, Object> row) {
@@ -204,8 +318,9 @@ public class ExamGradeImportValidator {
         if (student == null) {
             throw new RuntimeException("学生不存在: " + studentIdentifier);
         }
-        // 自动创建选课记录
+        
         ensureEnrollment(student, exam.getCourse());
+        
         ExamGrade grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), student.getId())
             .orElse(null);
 
@@ -215,6 +330,17 @@ public class ExamGradeImportValidator {
             grade.setExam(exam);
             grade.setStudent(student);
             grade.setCreatedAt(LocalDateTime.now());
+            
+            Double previousScore = getPreviousExamScore(student, exam);
+            if (previousScore != null) {
+                String trend = calculateScoreTrend(score, previousScore);
+                grade.setScoreTrend(trend);
+            } else {
+                grade.setScoreTrend("STABLE");
+            }
+        } else {
+            String trend = calculateScoreTrend(score, (double) grade.getScore());
+            grade.setScoreTrend(trend);
         }
 
         grade.setScore(score.intValue());
@@ -222,15 +348,47 @@ public class ExamGradeImportValidator {
 
         ExamGrade saved = examGradeRepository.save(grade);
     
-    // ========== 新增：同步考试参与活动记录 ==========
-    try {
-        activitySyncService.syncExamActivity(student, exam, score.intValue());
-    } catch (Exception e) {
-        log.error("同步考试活动记录失败", e);
-    }
+        try {
+            activitySyncService.syncExamActivity(student, exam, score.intValue());
+        } catch (Exception e) {
+            log.error("同步考试活动记录失败", e);
+        }
 
         return saved;
     }
+       /**
+     * 获取学生上次同类型考试的成绩
+     */
+    private Double getPreviousExamScore(Student student, Exam currentExam) {
+        // 查找同课程、同类型且考试日期在当前之前的考试
+        List<Exam> previousExams = examRepository.findByCourseAndExamDateBefore(
+            currentExam.getCourse(), 
+            currentExam.getExamDate()
+        );
+        
+        if (previousExams.isEmpty()) {
+            return null;
+        }
+        
+        // 取最近的一次考试
+        Exam previousExam = previousExams.get(0);
+        Optional<ExamGrade> previousGrade = examGradeRepository
+            .findByExamIdAndStudentId(previousExam.getId(), student.getId());
+        
+        return previousGrade.map(ExamGrade::getScore).map(Double::valueOf).orElse(null);
+    }
+
+        /**
+         * 计算成绩趋势
+         */
+        private String calculateScoreTrend(Double currentScore, Double previousScore) {
+            if (previousScore == null) return "STABLE";
+            
+            double diff = currentScore - previousScore;
+            if (diff >= 5) return "UP";
+            if (diff <= -5) return "DOWN";
+            return "STABLE";
+        }
 
        /**
      * 确保学生已选课（自动创建 Enrollment）
@@ -361,40 +519,6 @@ public class ExamGradeImportValidator {
         kpScoreDetailRepository.save(detail);
     }
     
-    /**
-     * 获取考试成绩字段映射配置
-     */
-    public List<FieldMapping> getExamGradeFieldMappings() {
-        List<FieldMapping> mappings = new ArrayList<>();
-
-        FieldMapping studentName = new FieldMapping();
-        studentName.setTargetField("studentName");
-        studentName.setFieldDescription("学生姓名或学号");
-        studentName.setPossibleNames(Arrays.asList("学生", "学生姓名", "姓名", "学号", "Student", "Student Name", "StudentNo"));
-        studentName.setRequired(true);
-        studentName.setDataType("string");
-        studentName.setNeedExist(true);
-        mappings.add(studentName);
-
-        FieldMapping score = new FieldMapping();
-        score.setTargetField("score");
-        score.setFieldDescription("考试成绩");
-        score.setPossibleNames(Arrays.asList("成绩", "分数", "得分", "Score", "Grade"));
-        score.setRequired(true);
-        score.setDataType("number");
-        mappings.add(score);
-
-        FieldMapping remark = new FieldMapping();
-        remark.setTargetField("remark");
-        remark.setFieldDescription("备注");
-        remark.setPossibleNames(Arrays.asList("备注", "评语", "Remark", "Comment", "说明"));
-        remark.setRequired(false);
-        remark.setDataType("string");
-        mappings.add(remark);
-
-        return mappings;
-    }
-
      /**
      * 构建错误消息
      */

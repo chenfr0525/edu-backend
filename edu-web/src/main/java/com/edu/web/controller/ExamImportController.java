@@ -4,6 +4,7 @@ import com.edu.common.Result;
 import com.edu.domain.User;
 import com.edu.domain.dto.ConfirmInsertRequest;
 import com.edu.domain.dto.FileParseRequest;
+import com.edu.domain.dto.ImportResult;
 import com.edu.domain.dto.ParseResult;
 import com.edu.domain.dto.ExamGradeImportResult;
 import com.edu.service.AuthService;
@@ -34,7 +35,7 @@ public class ExamImportController {
      */
     @PostMapping("/parse")
     public Result<ParseResult> parseExamFile(@RequestBody FileParseRequest request) {
-        request.setFieldMappings(examImportValidator.getExamFieldMappings());
+        request.setFieldMappings(examImportValidator.getExamParseFieldMappings());
         
         if (request.getFileContent() == null || request.getFileContent().isEmpty()) {
             return Result.error("文件内容不能为空");
@@ -54,10 +55,10 @@ public class ExamImportController {
      */
     @PostMapping("/confirm")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<String> confirmExamInsert(@RequestBody ConfirmInsertRequest request) {
+    public Result<ImportResult> confirmExamInsert(@RequestBody ConfirmInsertRequest request) {
         User currentUser = authService.getUser();
-        String message = fileProcessService.confirmAndInsert(request,currentUser);
-        return Result.success(message);
+        ImportResult result = fileProcessService.confirmAndInsert(request, currentUser);
+        return result.isSuccess() ? Result.success(result) : Result.error(result.getMessage());
     }
 
     /**
@@ -65,7 +66,7 @@ public class ExamImportController {
      */
     @PostMapping("/grade/parse")
     public Result<ParseResult> parseExamGradeFile(@RequestBody FileParseRequest request) {
-        request.setFieldMappings(examGradeImportValidator.getExamGradeFieldMappings());
+        request.setFieldMappings(examGradeImportValidator.getExamGradeParseFieldMappings());
         
         if (request.getFileContent() == null || request.getFileContent().isEmpty()) {
             return Result.error("文件内容不能为空");

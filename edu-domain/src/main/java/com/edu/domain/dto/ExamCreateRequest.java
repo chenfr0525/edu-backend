@@ -5,6 +5,7 @@ import lombok.Data;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.List;
 
 import com.edu.domain.ExamStatus;
 
@@ -22,4 +23,5 @@ public class ExamCreateRequest {
     private Integer passScore;     // 及格分，默认60
     private String location;       // 考试地点
     private String description;    // 考试说明
+    private List<Long> knowledgePointIds;// 知识点ID列表[1,2,3]
 }

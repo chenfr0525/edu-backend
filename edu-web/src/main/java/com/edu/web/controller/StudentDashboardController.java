@@ -20,9 +20,6 @@ public class StudentDashboardController {
     private final SubmissionService submissionService;
     private final StudentKnowledgeMasteryService masteryService;
     private final ActivityRecordService activityRecordService;
-    private final KnowledgePointScoreDetailService kpScoreDetailService;
-    private final ExamService examService;
-    private final EnrollmentService enrollmentService;
     private final StudentDashboardAiService studentDashboardAiService;
 
     /**
@@ -44,7 +41,6 @@ public class StudentDashboardController {
         studentInfoMap.put("studentNo", student.getStudentNo());
         studentInfoMap.put("className", student.getClassInfo() != null ? student.getClassInfo().getName() : "未分班");
         studentInfoMap.put("grade", student.getGrade());
-        studentInfoMap.put("avatar", student.getUser().getAvatar());
         dashboard.put("studentInfo", studentInfoMap);
         
         // 2. 成绩趋势（历次考试分数）

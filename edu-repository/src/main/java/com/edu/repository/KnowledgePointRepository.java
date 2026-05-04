@@ -17,7 +17,13 @@ public interface KnowledgePointRepository extends JpaRepository<KnowledgePoint, 
     List<KnowledgePoint> findByLevel(int level);
 
     Optional<KnowledgePoint> findById(Long id);
+
+    Optional<KnowledgePoint> findByNameAndCourse(String name, Course course);
     
     // 按排序查询
     List<KnowledgePoint> findByCourseOrderBySortOrderAsc(Course course);
+
+    List<KnowledgePoint> findByCourseId(Long courseId);
+
+    Boolean existsByCourseAndName(Course course, String name);
 }

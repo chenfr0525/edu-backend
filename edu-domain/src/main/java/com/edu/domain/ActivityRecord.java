@@ -4,6 +4,7 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class ActivityRecord {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -24,7 +26,7 @@ public class ActivityRecord {
 
     @Column(name = "type")
       @Enumerated(EnumType.STRING)
-    private ActivityStatus type = ActivityStatus.VISIT;
+    private ActivityStatus type = ActivityStatus.LOGIN;
 
       @Column(columnDefinition = "TEXT")
     private String description;

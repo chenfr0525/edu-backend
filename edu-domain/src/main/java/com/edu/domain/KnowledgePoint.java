@@ -6,6 +6,8 @@ import javax.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
+
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
@@ -13,6 +15,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class KnowledgePoint {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

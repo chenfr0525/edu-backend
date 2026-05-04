@@ -77,7 +77,7 @@ public class HomeworkManageController {
     @PostMapping("/import/parse")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public Result<ParseResult> parseHomeworkFile(@RequestBody FileParseRequest request) {
-         request.setFieldMappings(homeworkManageService.getHomeworkFieldMappings());
+         request.setFieldMappings(homeworkManageService.getHomeworkParseFieldMappings());
         if (request.getFileContent() == null || request.getFileContent().isEmpty()) {
             return Result.error("文件内容不能为空");
         }
@@ -95,10 +95,10 @@ public class HomeworkManageController {
      */
     @PostMapping("/import/confirm")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<String> confirmHomeworkImport(@RequestBody ConfirmInsertRequest request) {
-         User currentUser = authService.getUser();
-         String message = fileProcessService.confirmAndInsert(request,currentUser);
-        return Result.success(message);
+    public Result<ImportResult> confirmHomeworkImport(@RequestBody ConfirmInsertRequest request) {
+        User currentUser = authService.getUser();
+        ImportResult result = fileProcessService.confirmAndInsert(request, currentUser);
+        return result.isSuccess() ? Result.success(result) : Result.error(result.getMessage());
     }
 
     /**
@@ -107,7 +107,7 @@ public class HomeworkManageController {
     @PostMapping("/grades/import/parse")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public Result<ParseResult> parseHomeworkGradeFile(@RequestBody FileParseRequest request) {
-          request.setFieldMappings(homeworkManageService.getHomeworkGradeFieldMappings());
+          request.setFieldMappings(homeworkManageService.getHomeworkGradeParseFieldMappings());
         if (request.getFileContent() == null || request.getFileContent().isEmpty()) {
             return Result.error("文件内容不能为空");
         }
@@ -125,13 +125,12 @@ public class HomeworkManageController {
      */
     @PostMapping("/{homeworkId}/grades/import/confirm")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<String> confirmHomeworkGradeImport(
+    public Result<HomeworkGradeImportResultVO> confirmHomeworkGradeImport(
             @PathVariable Long homeworkId,
             @RequestBody ConfirmInsertRequest request) {
-                User currentUser = authService.getUser();
         HomeworkGradeImportResultVO result = homeworkManageService.confirmHomeworkGradeImport(
             homeworkId, request.getData());
-        return result.isSuccess() ? Result.success("数据导入成功") : Result.success(result.getMessage());
+        return result.isSuccess() ? Result.success(result) : Result.error(result.getMessage());
     }
 
     /**

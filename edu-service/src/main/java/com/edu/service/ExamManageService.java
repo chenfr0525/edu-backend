@@ -221,36 +221,30 @@ public class ExamManageService {
         // 更新基本信息
         exam.setName(request.getName());
         exam.setType(request.getType());
-        exam.setExamDate(request.getExamDate());
-        exam.setStartTime(request.getStartTime());
-        exam.setEndTime(request.getEndTime());
-        exam.setDuration(request.getDuration());
+         if (request.getExamDate() != null) exam.setExamDate(request.getExamDate());
         exam.setFullScore(request.getFullScore() != null ? request.getFullScore() : 100);
         exam.setPassScore(request.getPassScore() != null ? request.getPassScore() : 60);
-        exam.setLocation(request.getLocation());
         exam.setDescription(request.getDescription());
         
         // 如果班级有变化，更新班级
-        if (request.getClassId() != null && !request.getClassId().equals(exam.getClassInfo().getId())) {
-            ClassInfo classInfo = classRepository.findById(request.getClassId())
-                .orElseThrow(() -> new RuntimeException("班级不存在"));
-            exam.setClassInfo(classInfo);
-        }
-        
-        // 如果课程有变化，更新课程
-        if (request.getCourseId() != null && !request.getCourseId().equals(exam.getCourse().getId())) {
-            Course course = courseRepository.findById(request.getCourseId())
-                .orElseThrow(() -> new RuntimeException("课程不存在"));
-            exam.setCourse(course);
-            
-            // 课程变化时，重新初始化知识点分布
-            Map<String, Object> kpDistribution = initKnowledgePointsDistribution(course);
-            try {
-                exam.setKnowledgePointsDistribution(objectMapper.writeValueAsString(kpDistribution));
-            } catch (JsonProcessingException e) {
-                log.error("序列化知识点分布失败", e);
-            }
-        }
+    if (request.getClassId() != null && (exam.getClassInfo() == null || !request.getClassId().equals(exam.getClassInfo().getId()))) {
+        ClassInfo classInfo = classRepository.findById(request.getClassId())
+            .orElseThrow(() -> new RuntimeException("班级不存在"));
+        exam.setClassInfo(classInfo);
+    }
+    
+    // 如果课程有变化，更新课程
+    if (request.getCourseId() != null && (exam.getCourse() == null || !request.getCourseId().equals(exam.getCourse().getId()))) {
+        Course course = courseRepository.findById(request.getCourseId())
+            .orElseThrow(() -> new RuntimeException("课程不存在"));
+        exam.setCourse(course);
+    }
+
+     if (request.getKnowledgePointIds() != null) {
+        exam.setKnowledgePointIds(request.getKnowledgePointIds());
+        log.info("更新考试知识点ID列表: {}", request.getKnowledgePointIds());
+    }
+    
         
         return examRepository.save(exam);
     }
@@ -335,23 +329,14 @@ public class ExamManageService {
         exam.setClassInfo(classInfo);
         exam.setCourse(course);
         exam.setExamDate(request.getExamDate());
-        exam.setStartTime(request.getStartTime());
-        exam.setEndTime(request.getEndTime());
-        exam.setDuration(request.getDuration());
         exam.setFullScore(request.getFullScore() != null ? request.getFullScore() : 100);
         exam.setPassScore(request.getPassScore() != null ? request.getPassScore() : 60);
-        exam.setLocation(request.getLocation());
         exam.setDescription(request.getDescription());
         exam.setStatus(ExamStatus.UPCOMING);
-        
-        // 初始化知识点分值分布（基于课程知识点）
-        Map<String, Object> kpDistribution = initKnowledgePointsDistribution(course);
-        try {
-            exam.setKnowledgePointsDistribution(objectMapper.writeValueAsString(kpDistribution));
-        } catch (JsonProcessingException e) {
-            log.error("序列化知识点分布失败", e);
-        }
-        
+        if (request.getKnowledgePointIds() != null && !request.getKnowledgePointIds().isEmpty()) {
+        exam.setKnowledgePointIds(request.getKnowledgePointIds());
+        log.info("创建考试时保存知识点ID列表: {}", request.getKnowledgePointIds());
+    }
         return examRepository.save(exam);
     }
 

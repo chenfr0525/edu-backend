@@ -29,12 +29,12 @@ public interface KnowledgePointScoreDetailRepository extends JpaRepository<Knowl
     
     // 查询学生平均得分率（所有知识点）
     @Query("SELECT AVG(k.scoreRate) FROM KnowledgePointScoreDetail k WHERE k.student = :student")
-    BigDecimal getStudentAvgScoreRate(Student student);
+    BigDecimal getStudentAvgScoreRateByStudent(Student student);
 
      /**
      * 查询某学生某课程的所有知识点得分记录（按知识点分组取最新）
      */
-    @Query("SELECT k FROM KnowledgePointScoreDetail k " +
+     @Query("SELECT k FROM KnowledgePointScoreDetail k " +
            "WHERE k.student.id = :studentId " +
            "AND k.knowledgePoint.course.id = :courseId " +
            "AND k.createdAt = (SELECT MAX(k2.createdAt) FROM KnowledgePointScoreDetail k2 " +
@@ -64,7 +64,7 @@ public interface KnowledgePointScoreDetailRepository extends JpaRepository<Knowl
     /**
      * 查询某学生某知识点的历史得分记录（按时间排序）
      */
-    @Query("SELECT k FROM KnowledgePointScoreDetail k " +
+     @Query("SELECT k FROM KnowledgePointScoreDetail k " +
            "WHERE k.student.id = :studentId " +
            "AND k.knowledgePoint.id = :kpId " +
            "ORDER BY k.createdAt ASC")
@@ -81,6 +81,22 @@ public interface KnowledgePointScoreDetailRepository extends JpaRepository<Knowl
     List<KnowledgePointScoreDetail> findAllByStudentIdAndKpId(@Param("studentId") Long studentId,
                                                                @Param("kpId") Long kpId);
 
-         List<KnowledgePointScoreDetail> findBySourceTypeAndSourceIdAndKnowledgePointId(
+       List<KnowledgePointScoreDetail> findBySourceTypeAndSourceIdAndKnowledgePointId(
         String sourceType, Long sourceId, Long knowledgePointId);
+
+         @Query("SELECT k FROM KnowledgePointScoreDetail k " +
+           "WHERE k.sourceType = :sourceType " +
+           "AND k.sourceId = :sourceId " +
+           "AND k.student.id = :studentId")
+    List<KnowledgePointScoreDetail> findBySourceTypeAndSourceIdAndStudentId(
+        @Param("sourceType") String sourceType,
+        @Param("sourceId") Long sourceId, 
+        @Param("studentId") Long studentId);
+
+        @Query("SELECT AVG(k.scoreRate) FROM KnowledgePointScoreDetail k " +
+           "WHERE k.student.id = :studentId " +
+           "AND k.knowledgePoint.id = :kpId")
+    BigDecimal getStudentAvgScoreRate(@Param("studentId") Long studentId, 
+                                       @Param("kpId") Long kpId);
+
 }

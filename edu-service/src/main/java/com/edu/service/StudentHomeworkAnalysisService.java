@@ -5,16 +5,13 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
-import com.alibaba.fastjson.JSONObject;
-import com.edu.domain.AiAnalysisReport;
 import com.edu.domain.Course;
 import com.edu.domain.Homework;
 import com.edu.domain.KnowledgePoint;
-import com.edu.domain.Semester;
+import com.edu.domain.KnowledgePointScoreDetail;
 import com.edu.domain.Student;
 import com.edu.domain.Submission;
 import com.edu.domain.dto.AiSuggestionDTO;
@@ -29,6 +26,8 @@ import com.edu.domain.dto.StudentHomeworkDTO;
 import com.edu.domain.dto.StudentHomeworkDetailDTO;
 import com.edu.repository.HomeworkRepository;
 import com.edu.repository.KnowledgePointRepository;
+import com.edu.repository.KnowledgePointScoreDetailRepository;
+import com.edu.repository.StudentRepository;
 import com.edu.repository.SubmissionRepository;
 
 import java.util.*;
@@ -41,12 +40,10 @@ public class StudentHomeworkAnalysisService {
     private final SubmissionRepository submissionRepository;
     private final StudentService studentService;
     private final CourseService courseService;
-    private final SemesterService semesterService;
-    private final AiAnalysisReportService aiReportService;
-    private final DeepSeekService deepSeekService;
     private final KnowledgePointRepository knowledgePointRepository;
     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
-    // ==================== 公共方法 ====================
+    private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
+    private final StudentRepository studentRepository;
     
     public List<StudentHomeworkDTO> getStudentHomeworkList(Long studentId, Long courseId, String status) {
         Student student = studentService.findById(studentId)
@@ -312,20 +309,11 @@ public class StudentHomeworkAnalysisService {
         if (submission.isPresent()) {
             Submission sub = submission.get();
             info.setSubmissionId(sub.getId());
-            info.setContent(sub.getContent());
-            info.setAttachments(sub.getAttachments());
             info.setScore(sub.getScore());
             info.setFeedback(sub.getFeedback());
             info.setStatus(sub.getStatus().toString());
-            info.setSubmittedAt(sub.getSubmittedAt());
-            info.setGradedAt(sub.getGradedAt());
-            info.setIsLate(sub.getSubmissionLateMinutes() != null && sub.getSubmissionLateMinutes() > 0);
-            info.setLateMinutes(sub.getSubmissionLateMinutes());
-            info.setAiFeedback(sub.getAiFeedback());
-            info.setKnowledgePointScores(parseKnowledgePointScores(sub.getKnowledgePointScores()));
         } else {
             info.setStatus("PENDING");
-            info.setIsLate(false);
         }
         return info;
     }
@@ -378,47 +366,73 @@ public class StudentHomeworkAnalysisService {
     }
     
     private List<KnowledgePointMasteryDTO> getKnowledgePointAnalysis(Long studentId, Homework homework) {
-        List<KnowledgePointMasteryDTO> result = new ArrayList<>();
-        
-        Optional<Submission> submission = submissionRepository.findByStudentIdAndHomeworkId(studentId, homework.getId());
-        if (!submission.isPresent() || submission.get().getKnowledgePointScores() == null) {
-            return result;
-        }
-        
-        Submission sub = submission.get();
-        Map<String, Integer> myKpScores = parseKnowledgePointScores(sub.getKnowledgePointScores());
-        Map<String, BigDecimal> classAvgRates = calculateClassAvgRatesForHomework(homework);
-        
-        for (Map.Entry<String, Integer> entry : myKpScores.entrySet()) {
-            String kpId = entry.getKey();
-            Integer myScore = entry.getValue();
-            
-            KnowledgePointMasteryDTO dto = new KnowledgePointMasteryDTO();
-            dto.setKnowledgePointId(Long.parseLong(kpId));
-            dto.setKnowledgePointName(getKnowledgePointName(Long.parseLong(kpId)));
-            dto.setMyScore(myScore);
-            dto.setFullScore(10);
-            dto.setScoreRate(BigDecimal.valueOf(myScore * 10.0).setScale(2, RoundingMode.HALF_UP));
-            
-            BigDecimal classAvg = classAvgRates.getOrDefault(kpId, BigDecimal.ZERO);
-            dto.setClassAvgRate(classAvg);
-            
-            double myRate = myScore * 10.0;
-            if (myRate >= 80) {
-                dto.setLevel("GOOD");
-                dto.setSuggestion("✅ 掌握良好，继续保持");
-            } else if (myRate >= 60) {
-                dto.setLevel("MODERATE");
-                dto.setSuggestion("📚 基本掌握，建议加强练习");
-            } else {
-                dto.setLevel("WEAK");
-                dto.setSuggestion("🔴 薄弱知识点，需要重点复习");
-            }
-            result.add(dto);
-        }
-        
-        result.sort(Comparator.comparing(KnowledgePointMasteryDTO::getScoreRate));
+       List<KnowledgePointMasteryDTO> result = new ArrayList<>();
+    
+    // 1. 获取作业关联的知识点ID列表
+    List<Long> knowledgePointIds = homework.getKnowledgePointIds();
+    if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
+        log.warn("作业 {} 未关联知识点", homework.getId());
         return result;
+    }
+    
+    // 2. 获取知识点信息
+    List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
+
+     // 3. 获取班级ID（用于计算班级平均分）
+    Long classId = null;
+    // 通过作业的课程找到选修该课程的学生，再获取班级
+    List<Student> students = studentRepository.findByEnrollmentsCourse(homework.getCourse());
+    if (students != null && !students.isEmpty() && students.get(0).getClassInfo() != null) {
+        classId = students.get(0).getClassInfo().getId();
+    }
+    
+    // 4. 遍历知识点
+    for (KnowledgePoint kp : kps) {
+        // 4.1 获取该学生在本次作业中该知识点的得分率
+        List<KnowledgePointScoreDetail> details = kpScoreDetailRepository
+            .findBySourceTypeAndSourceIdAndKnowledgePointId("HOMEWORK", homework.getId(), kp.getId());
+ BigDecimal myRate = BigDecimal.ZERO;
+        for (KnowledgePointScoreDetail detail : details) {
+            if (detail.getStudent().getId().equals(studentId)) {
+                myRate = detail.getScoreRate();
+                break;
+            }
+        }
+        
+        // 4.2 获取班级平均得分率
+        BigDecimal classAvgRate = BigDecimal.ZERO;
+        if (classId != null) {
+            classAvgRate = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
+            if (classAvgRate == null) classAvgRate = BigDecimal.ZERO;
+        }
+        
+      // 4.3 构建 DTO
+        KnowledgePointMasteryDTO dto = new KnowledgePointMasteryDTO();
+        dto.setKnowledgePointId(kp.getId());
+        dto.setKnowledgePointName(kp.getName());
+        dto.setMyScore((int)(myRate.doubleValue() / 10));
+        dto.setFullScore(10);
+        dto.setScoreRate(myRate);
+        dto.setClassAvgRate(classAvgRate);
+        
+        // 等级判断
+        double rateValue = myRate.doubleValue();
+        if (rateValue >= 80) {
+            dto.setLevel("GOOD");
+            dto.setSuggestion("✅ 掌握良好，继续保持");
+        } else if (rateValue >= 60) {
+            dto.setLevel("MODERATE");
+            dto.setSuggestion("📚 基本掌握，建议加强练习");
+        } else {
+            dto.setLevel("WEAK");
+            dto.setSuggestion("🔴 薄弱知识点，需要重点复习");
+        }
+        
+       result.add(dto);
+        }
+    
+    result.sort(Comparator.comparing(KnowledgePointMasteryDTO::getScoreRate));
+    return result;
     }
     
     private ScoreAnalysisDTO getScoreAnalysis(Long studentId, Homework homework) {
@@ -493,54 +507,5 @@ public class StudentHomeworkAnalysisService {
             }
         }
         return "STABLE";
-    }
-    
-    private Map<String, BigDecimal> calculateClassAvgRatesForHomework(Homework homework) {
-        Map<String, BigDecimal> avgRates = new HashMap<>();
-        List<Submission> submissions = submissionRepository.findGradedByHomeworkId(homework.getId());
-        
-        if (submissions.isEmpty()) return avgRates;
-        
-        Map<String, List<Integer>> kpScores = new HashMap<>();
-        
-        for (Submission sub : submissions) {
-            Map<String, Integer> scores = parseKnowledgePointScores(sub.getKnowledgePointScores());
-            for (Map.Entry<String, Integer> entry : scores.entrySet()) {
-                kpScores.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
-            }
-        }
-        
-        for (Map.Entry<String, List<Integer>> entry : kpScores.entrySet()) {
-            double avg = entry.getValue().stream().mapToInt(Integer::intValue).average().orElse(0);
-            avgRates.put(entry.getKey(), BigDecimal.valueOf(avg * 10).setScale(2, RoundingMode.HALF_UP));
-        }
-        return avgRates;
-    }
-    
-    private Map<String, Integer> parseKnowledgePointScores(String json) {
-        Map<String, Integer> result = new HashMap<>();
-        if (json == null || json.isEmpty()) return result;
-        
-        try {
-            String cleaned = json.replace("{", "").replace("}", "").replace("\"", "");
-            String[] pairs = cleaned.split(",");
-            for (String pair : pairs) {
-                String[] kv = pair.split(":");
-                if (kv.length == 2) {
-                    result.put(kv[0].trim(), Integer.parseInt(kv[1].trim()));
-                }
-            }
-        } catch (Exception e) {
-            log.error("解析知识点得分失败: {}", json, e);
-        }
-        return result;
-    }
-    
-    private String getKnowledgePointName(Long kpId) {
-        Optional<KnowledgePoint> knowledgePoint = knowledgePointRepository.findById(kpId);
-        if (knowledgePoint.isPresent()) {
-            return knowledgePoint.get().getName();
-        }
-        return "知识点" + kpId;
     }
 }

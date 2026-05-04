@@ -14,5 +14,5 @@ import java.util.List;
 public class ActivityImportParseRequest {
    private String fileContent;
     private String fileName;
-    private String activityType; // LOGIN/HOMEWORK/EXAM/STUDY_DURATION/RESOURCE
+    private String activityType; // LOGIN/HOMEWORK/EXAM/STUDY/RESOURCE
 }

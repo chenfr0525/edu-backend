@@ -20,4 +20,5 @@ public class HomeworkCreateRequest {
     private Integer totalScore = 100;
     private HomeworkStatus status = HomeworkStatus.ONGOING;
     private LocalDateTime deadline;
+    private List<Long> knowledgePointIds;
 }

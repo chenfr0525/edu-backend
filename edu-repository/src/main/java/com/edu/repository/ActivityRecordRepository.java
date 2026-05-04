@@ -1,6 +1,7 @@
 package com.edu.repository;
 
 import com.edu.domain.ActivityRecord;
+import com.edu.domain.ActivityStatus;
 import com.edu.domain.Student;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -12,6 +13,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, Long> {
@@ -22,6 +24,9 @@ public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, 
 
      // 查询某学生在某段时间的活动记录
     List<ActivityRecord> findByStudentAndActivityDateBetween(Student student, LocalDateTime start, LocalDateTime end);
+
+    // 查询某学生在某段时间的活动记录
+    Optional<ActivityRecord> findByStudentAndTypeAndActivityDateBetween(Student student, ActivityStatus type, LocalDateTime start, LocalDateTime end);
     
     // 查询某班级某天的活动记录 - 修正：使用关联对象
     @Query("SELECT a FROM ActivityRecord a WHERE a.student.classInfo.id = :classId AND a.activityDate = :date")

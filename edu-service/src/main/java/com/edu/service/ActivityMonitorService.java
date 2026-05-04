@@ -1,6 +1,4 @@
 package com.edu.service;
-
-import com.alibaba.fastjson.JSON;
 import com.edu.domain.*;
 import com.edu.domain.dto.*;
 import com.edu.repository.*;
@@ -8,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -18,7 +15,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -520,14 +516,34 @@ public class ActivityMonitorService {
     public ParseResult parseActivityFile(String fileContent, String fileName, String activityType) {
         List<FieldMapping> mappings = getActivityFieldMappings(activityType);
         
+        // 1. AI解析文件
         ParseResult result = deepSeekService.parseFileData(fileContent, fileName, "活跃度数据", mappings);
         
-        // 补充活动类型
+        // 2. 补充活动类型和计算活跃度得分
         if (result.getData() != null) {
             for (Map<String, Object> row : result.getData()) {
-                row.put("activityType", activityType);
+                // 添加活动类型
+                if ("STUDY".equals(activityType)) {
+                    row.put("activityType", "STUDY");
+                } else if ("RESOURCE".equals(activityType)) {
+                    row.put("activityType", "RESOURCE");
+                }
+
                 // 计算活跃度得分
                 row.put("activityScore", calculateActivityScoreFromRow(row, activityType));
+                
+                // 匹配学生ID
+                String studentIdentifier = (String) row.get("studentName");
+                if (studentIdentifier != null) {
+                    Student student = findStudentByIdentifier(studentIdentifier);
+                    if (student != null) {
+                        row.put("studentId", student.getId());
+                        row.put("studentNo", student.getStudentNo());
+                    } else {
+                        row.put("studentId", null);
+                        row.put("_error_studentName", "学生不存在: " + studentIdentifier);
+                    }
+                }
             }
         }
         
@@ -543,7 +559,7 @@ public class ActivityMonitorService {
     private List<FieldMapping> getActivityFieldMappings(String activityType) {
         List<FieldMapping> mappings = new ArrayList<>();
         
-        // 学生字段（通用）
+        // 学生字段（通用，必填）
         FieldMapping studentField = new FieldMapping();
         studentField.setTargetField("studentName");
         studentField.setFieldDescription("学生姓名或学号");
@@ -553,40 +569,42 @@ public class ActivityMonitorService {
         studentField.setNeedExist(true);
         mappings.add(studentField);
         
-        // 活动日期
+        // 活动日期（通用，必填）
         FieldMapping dateField = new FieldMapping();
         dateField.setTargetField("activityDate");
-        dateField.setFieldDescription("活动日期");
-        dateField.setPossibleNames(Arrays.asList("日期", "活动日期", "Date", "日期"));
+        dateField.setFieldDescription("活动日期，格式：yyyy-MM-dd");
+        dateField.setPossibleNames(Arrays.asList("日期", "活动日期", "Date"));
         dateField.setRequired(true);
         dateField.setDataType("string");
         mappings.add(dateField);
         
-        // 根据不同类型添加特定字段
-        if ("STUDY_DURATION".equals(activityType)) {
+       // 根据不同类型添加特定字段
+        if ("STUDY".equals(activityType)) {
+            // 学习时长（必填）
             FieldMapping durationField = new FieldMapping();
             durationField.setTargetField("studyDuration");
             durationField.setFieldDescription("学习时长（分钟）");
-            durationField.setPossibleNames(Arrays.asList("学习时长", "时长", "分钟", "Duration"));
+            durationField.setPossibleNames(Arrays.asList("学习时长", "时长", "分钟", "Duration", "分钟数"));
             durationField.setRequired(true);
             durationField.setDataType("number");
             mappings.add(durationField);
         } 
         else if ("RESOURCE".equals(activityType)) {
+            // 资源访问次数（必填）
             FieldMapping resourceField = new FieldMapping();
             resourceField.setTargetField("resourceAccessCount");
             resourceField.setFieldDescription("资源访问次数");
-            resourceField.setPossibleNames(Arrays.asList("访问次数", "资源访问", "次数", "Count"));
+            resourceField.setPossibleNames(Arrays.asList("访问次数", "资源访问", "次数", "Count", "访问量"));
             resourceField.setRequired(true);
             resourceField.setDataType("number");
             mappings.add(resourceField);
         }
         
-        // 描述（可选）
+       // 描述（可选）
         FieldMapping descField = new FieldMapping();
         descField.setTargetField("description");
         descField.setFieldDescription("描述");
-        descField.setPossibleNames(Arrays.asList("描述", "备注", "Description"));
+        descField.setPossibleNames(Arrays.asList("描述", "备注", "Description", "资源名称"));
         descField.setRequired(false);
         descField.setDataType("string");
         mappings.add(descField);
@@ -595,14 +613,21 @@ public class ActivityMonitorService {
     }
 
     private BigDecimal calculateActivityScoreFromRow(Map<String, Object> row, String activityType) {
-        // 根据活动类型计算贡献分
-        if ("STUDY_DURATION".equals(activityType)) {
-            Integer duration = row.get("studyDuration") != null ? ((Number) row.get("studyDuration")).intValue() : 0;
-            return BigDecimal.valueOf(Math.min(duration, 100)).setScale(2, RoundingMode.HALF_UP);
+        if ("STUDY".equals(activityType)) {
+            Integer duration = row.get("studyDuration") != null 
+                ? ((Number) row.get("studyDuration")).intValue() 
+                : 0;
+            // 学习时长得分：每分钟1分，最高100分
+            int score = Math.min(duration, 100);
+            return BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP);
         } 
         else if ("RESOURCE".equals(activityType)) {
-            Integer count = row.get("resourceAccessCount") != null ? ((Number) row.get("resourceAccessCount")).intValue() : 0;
-            return BigDecimal.valueOf(Math.min(count * 2, 100)).setScale(2, RoundingMode.HALF_UP);
+            Integer count = row.get("resourceAccessCount") != null 
+                ? ((Number) row.get("resourceAccessCount")).intValue() 
+                : 0;
+            // 资源访问得分：每次2分，最高100分
+            int score = Math.min(count * 2, 100);
+            return BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP);
         }
         return BigDecimal.valueOf(50);
     }
@@ -613,61 +638,116 @@ public class ActivityMonitorService {
         int failCount = 0;
         List<String> errors = new ArrayList<>();
         
-        for (Map<String, Object> row : data) {
+        for (int i = 0; i < data.size(); i++) {
+            Map<String, Object> row = data.get(i);
             try {
                 insertActivityRecord(row);
                 successCount++;
+                log.info("成功导入活跃度记录 - 第{}行，学生：{}", i + 1, row.get("studentName"));
             } catch (Exception e) {
                 failCount++;
-                String errorMsg = String.format("导入失败 - 学生：%s，原因：%s",
-                    row.get("studentName"), e.getMessage());
+                String errorMsg = String.format("第%d行 - 学生：%s，原因：%s",
+                    i + 1, row.get("studentName"), e.getMessage());
                 log.error(errorMsg);
                 errors.add(errorMsg);
+                // 抛出异常触发回滚
+                    throw new RuntimeException("活跃度数据导入失败，已回滚所有数据：" + errorMsg);
+                }
             }
+            return ActivityImportResultVO.builder()
+                    .totalImported(data.size())
+                    .successCount(successCount)
+                    .failCount(failCount)
+                    .errors(errors)
+                    .success(failCount == 0)
+                    .message(String.format("导入完成！成功：%d条，失败：%d条", successCount, failCount))
+                    .build();
         }
-        
-        return ActivityImportResultVO.builder()
-            .totalImported(data.size())
-            .successCount(successCount)
-            .failCount(failCount)
-            .errors(errors)
-            .success(failCount == 0)
-            .message(String.format("导入完成！成功：%d条，失败：%d条", successCount, failCount))
-            .build();
-    }
 
     private void insertActivityRecord(Map<String, Object> row) {
-        String studentName = (String) row.get("studentName");
-        String activityDateStr = (String) row.get("activityDate");
-        String activityType = (String) row.get("activityType");
-        String description = (String) row.get("description");
-        BigDecimal activityScore = (BigDecimal) row.get("activityScore");
-        
-        // 查找学生
-        Student student = findStudentByIdentifier(studentName);
-        if (student == null) {
-            throw new RuntimeException("学生不存在: " + studentName);
+        // 1. 获取学生（使用已匹配的studentId或通过名称查找）
+        Student student = null;
+        if (row.get("studentId") != null) {
+            Long studentId = ((Number) row.get("studentId")).longValue();
+            student = studentRepository.findById(studentId)
+              .orElseThrow(() -> new RuntimeException("学生不存在: ID=" + studentId));
+        } else if (row.get("studentName") != null){
+            String studentName = (String) row.get("studentName");
+            student = findStudentByIdentifier(studentName);
+            if (student == null) {
+                throw new RuntimeException("学生不存在: " + studentName);
+            }
+        } else {
+            throw new RuntimeException("未提供学生标识（studentId 或 studentName）");
         }
+        final Student finalStudent = student;
         
+        // 2. 获取活动日期
+        String activityDateStr = (String) row.get("activityDate");
         LocalDateTime activityDate = parseDateTime(activityDateStr);
         
+        // 3. 获取活动类型
+        String activityType = (String) row.get("activityType");
+        
+        // 4. 获取描述（可选）
+        String description = (String) row.get("description");
+        
+        // 5. 获取活跃度得分
+        BigDecimal activityScore = row.get("activityScore") != null 
+            ? new BigDecimal(row.get("activityScore").toString()) 
+            : BigDecimal.valueOf(50);
+        
+         // 6. 创建活动记录
         ActivityRecord record = new ActivityRecord();
-        record.setStudent(student);
+        record.setStudent(finalStudent);
         record.setType(ActivityStatus.valueOf(activityType));
         record.setDescription(description);
         record.setActivityDate(activityDate);
         record.setActivityScore(activityScore);
-        record.setInteractionCount(0);
+        record.setInteractionCount(0);  // 默认值
         
-        if ("STUDY_DURATION".equals(activityType)) {
-            Integer duration = row.get("studyDuration") != null ? ((Number) row.get("studyDuration")).intValue() : 0;
-            record.setStudyDuration(duration);
-        } else if ("RESOURCE".equals(activityType)) {
-            Integer count = row.get("resourceAccessCount") != null ? ((Number) row.get("resourceAccessCount")).intValue() : 0;
-            record.setResourceAccessCount(count);
+        // 7. 根据类型设置特定字段
+        if ("STUDY".equals(activityType)) {
+            Integer studyDuration = row.get("studyDuration") != null 
+                ? ((Number) row.get("studyDuration")).intValue() 
+                : 0;
+            record.setStudyDuration(studyDuration);
+            record.setResourceAccessCount(0);
+            
+            log.info("导入学习时长记录 - 学生：{}，时长：{}分钟，日期：{}", 
+                finalStudent.getUser().getName(), studyDuration, activityDate);
+        } 
+        else if ("RESOURCE".equals(activityType)) {
+            Integer resourceCount = row.get("resourceAccessCount") != null 
+                ? ((Number) row.get("resourceAccessCount")).intValue() 
+                : 0;
+            record.setResourceAccessCount(resourceCount);
+            record.setStudyDuration(0);
+            
+            log.info("导入资源访问记录 - 学生：{}，访问次数：{}，日期：{}", 
+                finalStudent.getUser().getName(), resourceCount, activityDate);
+        }
+        // 8. 检查是否已存在同类型同日的记录（避免重复）
+        LocalDate date = activityDate.toLocalDate();
+        LocalDateTime startOfDay = date.atStartOfDay();
+        LocalDateTime endOfDay = date.atTime(23, 59, 59);
+        
+        List<ActivityRecord> existingRecords = activityRecordRepository
+            .findByStudentAndActivityDateBetween(finalStudent, startOfDay, endOfDay);
+        
+        boolean exists = existingRecords.stream()
+            .anyMatch(r -> r.getType() == ActivityStatus.valueOf(activityType));
+        
+        if (exists) {
+            log.warn("学生 {} 在 {} 已有 {} 类型记录，跳过重复导入", 
+                finalStudent.getUser().getName(), date, activityType);
+            // 可以选择更新而不是跳过，这里选择跳过
+            return;
         }
         
         activityRecordRepository.save(record);
+        log.info("活跃度记录导入成功 - 学生：{}，类型：{}，日期：{}", 
+            finalStudent.getUser().getName(), activityType, activityDate);
     }
 
     // ==================== 4. 统计卡片 ====================

@@ -24,4 +24,10 @@ public class ValidationError {
         this.errorMessage = errorMessage;
         this.errorType = errorType;
     }
+
+     @Override
+    public String toString() {
+        return String.format("第%d行 [%s] %s: %s (当前值: %s)", 
+            rowIndex, errorType, field, errorMessage, value);
+    }
 }

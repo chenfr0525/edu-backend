@@ -148,12 +148,12 @@ public class CourseAnalysisController {
      */
     @PostMapping("/{courseId}/knowledge-point/import/confirm")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public Result<String> confirmKnowledgePointImport(
+    public Result<KnowledgePointImportResultVO> confirmKnowledgePointImport(
             @PathVariable Long courseId,
             @RequestBody ConfirmInsertRequest request) {
         KnowledgePointImportResultVO result = courseAnalysisService.confirmKnowledgePointImport(
             courseId, request.getData());
-        return result.isSuccess() ? Result.success("数据导入成功"): Result.error(result.getMessage());
+        return result.isSuccess() ? Result.success(result) : Result.error(result.getMessage());
     }
 
     /**

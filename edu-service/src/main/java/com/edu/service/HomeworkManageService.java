@@ -1,11 +1,9 @@
 package com.edu.service;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.edu.domain.*;
 import com.edu.domain.dto.*;
 import com.edu.repository.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -17,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -198,28 +197,31 @@ public class HomeworkManageService {
 
     @Transactional
     public Homework createHomework(HomeworkCreateRequest request) {
-        Course course = courseRepository.findById(request.getCourseId())
-            .orElseThrow(() -> new RuntimeException("课程不存在"));
-
-            KnowledgePoint knowledgePoint=null;
+         Course course = courseRepository.findById(request.getCourseId())
+        .orElseThrow(() -> new RuntimeException("课程不存在"));
+    
+    // 确定作业状态
+    HomeworkStatus status = HomeworkStatus.ONGOING;
+    if (request.getDeadline() != null && request.getDeadline().isBefore(LocalDateTime.now())) {
+        status = HomeworkStatus.COMPLETED;
+    }
         
-             if (request.getKnowledgePointId() != null) {
-         knowledgePoint = knowledgePointRepository.findById(request.getKnowledgePointId())
-            .orElse(null);
-             }
-        
-        Homework homework = Homework.builder()
-            .name(request.getName())
-            .description(request.getDescription())
-            .course(course)
-            .questionCount(request.getQuestionCount() != null ? request.getQuestionCount() : 0)
-            .totalScore(request.getTotalScore() != null ? request.getTotalScore() : 100)
-            .status(request.getStatus())
-            .deadline(request.getDeadline())
-            .createdAt(LocalDateTime.now())
-            .build();
-        
-        return homeworkRepository.save(homework);
+      Homework homework = Homework.builder()
+        .name(request.getName())
+        .description(request.getDescription())
+        .course(course)
+        .questionCount(0)  // 默认0，不需要了
+        .totalScore(request.getTotalScore() != null ? request.getTotalScore() : 100)
+        .status(status)
+        .deadline(request.getDeadline())
+        .createdAt(LocalDateTime.now())
+        .build();
+    if (request.getKnowledgePointIds() != null && !request.getKnowledgePointIds().isEmpty()) {
+        homework.setKnowledgePointIds(request.getKnowledgePointIds());
+        log.info("创建作业时保存知识点ID列表: {}", request.getKnowledgePointIds());
+    }
+    
+    return homeworkRepository.save(homework);
     }
 
     // ==================== 4. 作业详情 ====================
@@ -424,9 +426,13 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
 }
 
     // ==================== 5. AI解析作业文件 ====================
-    public List<FieldMapping> getHomeworkFieldMappings() {
+    /**
+     * 作业解析阶段字段映射 - 用于AI解析Excel文件
+     * 字段名：用户友好的名称（课程名称、班级名称、知识点名称）
+     */
+    public List<FieldMapping> getHomeworkParseFieldMappings() {
         List<FieldMapping> mappings = new ArrayList<>();
-        
+        // 作业名称（必填）
         FieldMapping name = new FieldMapping();
         name.setTargetField("name");
         name.setFieldDescription("作业名称");
@@ -435,6 +441,7 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         name.setDataType("string");
         mappings.add(name);
         
+         // 课程名称（必填，需存在）
         FieldMapping courseName = new FieldMapping();
         courseName.setTargetField("courseName");
         courseName.setFieldDescription("课程名称");
@@ -444,14 +451,25 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         courseName.setNeedExist(true);
         mappings.add(courseName);
         
+        // 截止日期（必填）
         FieldMapping deadline = new FieldMapping();
         deadline.setTargetField("deadline");
-        deadline.setFieldDescription("截止时间");
+        deadline.setFieldDescription("截止时间，格式：yyyy-MM-dd HH:mm:ss");
         deadline.setPossibleNames(Arrays.asList("截止时间", "截止日期", "Deadline", "提交截止"));
         deadline.setRequired(true);
         deadline.setDataType("string");
         mappings.add(deadline);
+
+        // 班级名称（可选）
+        FieldMapping className = new FieldMapping();
+        className.setTargetField("className");
+        className.setFieldDescription("班级名称");
+        className.setPossibleNames(Arrays.asList("班级", "所属班级", "班别", "Class", "ClassName"));
+        className.setRequired(false);
+        className.setDataType("string");
+        mappings.add(className);
         
+         // 总分（可选，默认100）
         FieldMapping totalScore = new FieldMapping();
         totalScore.setTargetField("totalScore");
         totalScore.setFieldDescription("总分");
@@ -460,6 +478,7 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         totalScore.setDataType("number");
         mappings.add(totalScore);
         
+       // 描述（可选）
         FieldMapping description = new FieldMapping();
         description.setTargetField("description");
         description.setFieldDescription("作业描述");
@@ -467,92 +486,391 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         description.setRequired(false);
         description.setDataType("string");
         mappings.add(description);
-        
+
+        // 知识点名称（可选）- 解析时用名称，导入时转为ID列表
+        FieldMapping knowledgePointNames = new FieldMapping();
+        knowledgePointNames.setTargetField("knowledgePointNames");
+        knowledgePointNames.setFieldDescription("知识点名称，多个用逗号分隔");
+        knowledgePointNames.setPossibleNames(Arrays.asList("知识点", "知识点名称", "KnowledgePoint"));
+        knowledgePointNames.setRequired(false);
+        knowledgePointNames.setDataType("string");
+        mappings.add(knowledgePointNames);
+            
         return mappings;
     }
 
+    /**
+ * 作业导入阶段字段映射 - 用于验证前端传来的数据
+ * 字段名：代码中使用的字段名（courseId, classId, knowledgePointIds）
+ */
+public List<FieldMapping> getHomeworkImportFieldMappings() {
+    List<FieldMapping> mappings = new ArrayList<>();
+
+    // 作业名称（必填）
+    FieldMapping name = new FieldMapping();
+    name.setTargetField("name");
+    name.setFieldDescription("作业名称");
+    name.setPossibleNames(Arrays.asList("name", "作业名称"));
+    name.setRequired(true);
+    name.setDataType("string");
+    mappings.add(name);
+
+    // 课程ID（必填）
+    FieldMapping courseId = new FieldMapping();
+    courseId.setTargetField("courseId");
+    courseId.setFieldDescription("课程ID");
+    courseId.setPossibleNames(Arrays.asList("courseId", "课程ID"));
+    courseId.setRequired(true);
+    courseId.setDataType("number");
+    courseId.setNeedExist(true);
+    mappings.add(courseId);
+
+    // 截止时间（必填）
+    FieldMapping deadline = new FieldMapping();
+    deadline.setTargetField("deadline");
+    deadline.setFieldDescription("截止时间");
+    deadline.setPossibleNames(Arrays.asList("deadline", "截止时间"));
+    deadline.setRequired(true);
+    deadline.setDataType("string");
+    mappings.add(deadline);
+
+    // 班级ID（可选）
+    FieldMapping classId = new FieldMapping();
+    classId.setTargetField("classId");
+    classId.setFieldDescription("班级ID");
+    classId.setPossibleNames(Arrays.asList("classId", "班级ID"));
+    classId.setRequired(false);
+    classId.setDataType("number");
+    classId.setNeedExist(true);
+    mappings.add(classId);
+
+    // 知识点ID列表（可选）
+    FieldMapping knowledgePointIds = new FieldMapping();
+    knowledgePointIds.setTargetField("knowledgePointIds");
+    knowledgePointIds.setFieldDescription("知识点ID列表");
+    knowledgePointIds.setPossibleNames(Arrays.asList("knowledgePointIds", "知识点ID"));
+    knowledgePointIds.setRequired(false);
+    knowledgePointIds.setDataType("array");
+    mappings.add(knowledgePointIds);
+
+    // 总分（可选）
+    FieldMapping totalScore = new FieldMapping();
+    totalScore.setTargetField("totalScore");
+    totalScore.setFieldDescription("总分");
+    totalScore.setPossibleNames(Arrays.asList("totalScore", "总分"));
+    totalScore.setRequired(false);
+    totalScore.setDataType("number");
+    mappings.add(totalScore);
+
+    // 描述（可选）
+    FieldMapping description = new FieldMapping();
+    description.setTargetField("description");
+    description.setFieldDescription("作业描述");
+    description.setPossibleNames(Arrays.asList("description", "描述"));
+    description.setRequired(false);
+    description.setDataType("string");
+    mappings.add(description);
+
+    return mappings;
+}
+
+// HomeworkManageService.java - 修改 parseFile 相关方法
+
+/**
+ * AI解析作业文件后，自动将名称转换为ID
+ */
+public ParseResult parseAndConvertHomeworkFile(String fileContent, String fileName, 
+                                                Long currentUserId, String userRole) {
+    // 1. 获取解析阶段的字段映射
+    List<FieldMapping> mappings = getHomeworkParseFieldMappings();
+    
+    // 2. AI解析文件
+    ParseResult result = deepSeekService.parseFileData(fileContent, fileName, "homework", mappings);
+    
+    // 3. 解析成功后，自动转换名称到ID
+    if (result.isSuccess() && result.getData() != null && !result.getData().isEmpty()) {
+        convertHomeworkParseResultToIds(result, currentUserId, userRole);
+    }
+    
+    return result;
+}
+
+/**
+ * 将解析结果中的名称转换为ID
+ */
+private void convertHomeworkParseResultToIds(ParseResult result, Long currentUserId, String userRole) {
+    List<Map<String, Object>> data = result.getData();
+    
+    // 获取可见的课程列表
+    List<Course> visibleCourses = getVisibleCourses(currentUserId, userRole);
+    Map<String, Long> courseNameToIdMap = visibleCourses.stream()
+        .collect(Collectors.toMap(
+            Course::getName,
+            Course::getId,
+            (existing, replacement) -> existing
+        ));
+    
+    // 获取可见的班级列表
+    List<ClassInfo> visibleClasses = getVisibleClasses(currentUserId, userRole);
+    Map<String, Long> classNameToIdMap = visibleClasses.stream()
+        .collect(Collectors.toMap(
+            ClassInfo::getName,
+            ClassInfo::getId,
+            (existing, replacement) -> existing
+        ));
+    
+    // 获取所有知识点（按课程分组）
+    Map<Long, Map<String, Long>> courseKpNameToIdMap = new HashMap<>();
+    for (Course course : visibleCourses) {
+        List<KnowledgePoint> kps = knowledgePointRepository.findByCourse(course);
+        Map<String, Long> kpNameMap = kps.stream()
+            .collect(Collectors.toMap(
+                KnowledgePoint::getName,
+                KnowledgePoint::getId,
+                (existing, replacement) -> existing
+            ));
+        courseKpNameToIdMap.put(course.getId(), kpNameMap);
+    }
+    
+    for (Map<String, Object> row : data) {
+        // 1. 课程名称 -> courseId
+        String courseName = (String) row.get("courseName");
+        if (courseName != null && !courseName.isEmpty()) {
+            Long courseId = courseNameToIdMap.get(courseName);
+            if (courseId != null) {
+                row.put("courseId", courseId);
+                // 保留原始名称供前端显示
+                // row.put("courseName", courseName); // 保留不变
+            } else {
+                row.put("courseId", null);
+                row.put("_error_courseName", "课程不存在: " + courseName);
+            }
+        }
+        
+        // 2. 班级名称 -> classId
+        String className = (String) row.get("className");
+        if (className != null && !className.isEmpty()) {
+            Long classId = classNameToIdMap.get(className);
+            if (classId != null) {
+                row.put("classId", classId);
+            } else {
+                row.put("classId", null);
+                row.put("_error_className", "班级不存在: " + className);
+            }
+        }
+        
+        // 3. 知识点名称 -> knowledgePointIds
+        Long courseId = (Long) row.get("courseId");
+        String knowledgePointNames = (String) row.get("knowledgePointNames");
+        if (courseId != null && knowledgePointNames != null && !knowledgePointNames.isEmpty()) {
+            Map<String, Long> kpNameMap = courseKpNameToIdMap.get(courseId);
+            if (kpNameMap != null) {
+                String[] kpNameArray = knowledgePointNames.split("[,，、]");
+                List<Long> kpIds = new ArrayList<>();
+                List<String> notFoundKps = new ArrayList<>();
+                
+                for (String kpName : kpNameArray) {
+                    String trimmed = kpName.trim();
+                    Long kpId = kpNameMap.get(trimmed);
+                    if (kpId != null) {
+                        kpIds.add(kpId);
+                    } else {
+                        notFoundKps.add(trimmed);
+                    }
+                }
+                
+                if (!kpIds.isEmpty()) {
+                    row.put("knowledgePointIds", kpIds);
+                }
+                if (!notFoundKps.isEmpty()) {
+                    row.put("_error_knowledgePointNames", "知识点不存在: " + String.join(", ", notFoundKps));
+                }
+            }
+        }
+        
+        // 4. 转换截止时间格式（AI返回的是 "2026-03-26T00:00:00"）
+        String deadline = (String) row.get("deadline");
+        if (deadline != null) {
+            try {
+                // 处理 Excel 数字日期格式
+                if (deadline.matches("\\d+")) {
+                    long excelDateNum = Long.parseLong(deadline);
+                    LocalDate excelDate = LocalDate.of(1900, 1, 1).plusDays(excelDateNum - 2);
+                    row.put("deadline", excelDate.atStartOfDay().toString());
+                }
+            } catch (Exception e) {
+                log.warn("日期格式转换失败: {}", deadline);
+            }
+        }
+    }
+}
+
+/**
+ * 获取可见的课程列表
+ */
+private List<Course> getVisibleCourses(Long userId, String userRole) {
+    if ("ADMIN".equals(userRole)) {
+        return courseRepository.findAll();
+    } else {
+        Teacher teacher = teacherRepository.findByUser(userRepository.findById(userId).orElse(null))
+            .orElse(null);
+        if (teacher == null) return new ArrayList<>();
+        return courseRepository.findByTeacher(teacher);
+    }
+}
+
+/**
+ * 获取可见的班级列表
+ */
+private List<ClassInfo> getVisibleClasses(Long userId, String userRole) {
+    if ("ADMIN".equals(userRole)) {
+        return classRepository.findAll();
+    } else {
+        Teacher teacher = teacherRepository.findByUser(userRepository.findById(userId).orElse(null))
+            .orElse(null);
+        if (teacher == null) return new ArrayList<>();
+        return classRepository.findByTeacher(teacher);
+    }
+}
+
+
     @Transactional
-    public String confirmHomeworkImport(List<Map<String, Object>> data,User user) {
-        List<FieldMapping> mappings= getHomeworkFieldMappings();
-         List<ValidationError> errors = deepSeekService.validateData(data,mappings);
-         Long teacherId=teacherRepository.findByUser(user).get().getId();
+    public ImportResult confirmHomeworkImport(List<Map<String, Object>> data, User user) {
+        List<FieldMapping> mappings = getHomeworkImportFieldMappings();
+        Long teacherId = teacherRepository.findByUser(user).get().getId();
+        
+        // 1. 验证数据
+        List<ValidationError> errors = deepSeekService.validateData(data, mappings);
         if (!errors.isEmpty()) {
             log.error("数据验证失败：{}", errors);
-            StringBuilder sb = new StringBuilder();
-            for (ValidationError error : errors) {
-                sb.append(error.getErrorMessage()).append("\n");
-            }
-            log.error("数据验证失败：{}", sb.toString());
-            return sb.toString();
+            return ImportResult.builder()
+                .success(false)
+                .errorMessage(buildErrorMessage(errors))
+                .errors(errors.stream()
+                    .map(ValidationError::toString)
+                    .collect(Collectors.toList()))
+                .build();
         }
+        // 2. 批量插入
         int successCount = 0;
         int failCount = 0;
-        StringBuilder resultMsg = new StringBuilder();
-        Homework savedHomework = null;
+        List<String> errorDetails = new ArrayList<>();
         
-        for (Map<String, Object> row : data) {
+        for (int i = 0; i < data.size(); i++) {
+            Map<String, Object> row = data.get(i);
             try {
-                insertSingleHomework(row,teacherId);
+                insertSingleHomework(row, teacherId);
                 successCount++;
                 log.info("成功导入作业：{}", row.get("name"));
             } catch (Exception e) {
                 failCount++;
-                String errorMsg = String.format("导入失败 - 作业名称：%s，原因：%s",
-                    row.get("name"), e.getMessage());
+                String errorMsg = String.format("第%d行 - 作业名称：%s，原因：%s",
+                    i + 1, row.get("name"), e.getMessage());
                 log.error(errorMsg);
-               resultMsg.append(errorMsg).append("\n");
+                errorDetails.add(errorMsg);
             }
         }
-       if(failCount > 0){
-        String summary = String.format("插入完成！成功：%d条，失败：%d条", successCount, failCount);
-        log.info(summary);
-    return resultMsg.toString();}
-        return "数据导入成功";
+        // 3. 返回结果（不管是否有失败，都返回详细信息）
+    boolean allSuccess = failCount == 0;
+    String message = String.format("导入完成！成功：%d条，失败：%d条", successCount, failCount);
+    if(!allSuccess){
+        message += "，失败详情：";
+        message += String.join("\n", errorDetails);
+    }
+       return ImportResult.builder()
+        .success(allSuccess)
+        .successCount(successCount)
+        .failCount(failCount)
+        .errors(errorDetails)
+        .message(message)
+        .build();
     }
 
-    private void insertSingleHomework(Map<String, Object> row,Long teacherId) {
+
+
+    private void insertSingleHomework(Map<String, Object> row, Long teacherId) {
         String name = (String) row.get("name");
-        String courseName = (String) row.get("courseName");
+        Long courseId = null;
+        Object courseIdObj = row.get("courseId");
+            if (courseIdObj != null) {
+                if (courseIdObj instanceof Number) {
+                    courseId = ((Number) courseIdObj).longValue();
+                } else if (courseIdObj instanceof String) {
+                    try {
+                        courseId = Long.parseLong((String) courseIdObj);
+                    } catch (NumberFormatException e) {
+                        // 不是数字，忽略
+                    }
+                }
+            }
         String deadlineStr = (String) row.get("deadline");
+        // 可选字段
         Integer totalScore = row.get("totalScore") != null ? ((Number) row.get("totalScore")).intValue() : 100;
         String description = (String) row.get("description");
-        
-        List<Course> courses = courseRepository.findByNameAndTeacherId( teacherId,courseName);
-        if (courses == null || courses.isEmpty()) {
-            log.warn("未找到课程: {}", courseName);
-            throw new RuntimeException("课程 " + courseName + " 不存在");
+
+        // 知识点ID列表（AI解析后返回的）
+        List<Long> knowledgePointIds = null;
+        if (row.get("knowledgePointIds") != null) {
+            if (row.get("knowledgePointIds") instanceof List) {
+                knowledgePointIds = (List<Long>) row.get("knowledgePointIds");
+            } else if (row.get("knowledgePointIds") instanceof String) {
+                String kpStr = (String) row.get("knowledgePointIds");
+                try {
+                    knowledgePointIds = JSON.parseArray(kpStr, Long.class);
+                } catch (Exception e) {
+                    log.warn("解析知识点ID列表失败: {}", kpStr);
+                }
+            }
         }
-        Course course = courses.get(0);
+    
+        // 1. 查找课程
+        Optional<Course> courseOptional = courseRepository.findById(courseId);
+        if (!courseOptional.isPresent()) {
+            throw new RuntimeException("课程 " + courseId + " 不存在");
+        }
+        Course course = courseOptional.get();
+
+        // 2. 解析截止时间
         LocalDateTime deadline = parseDateTime(deadlineStr);
         
+        // 3. 确定作业状态（根据截止时间自动判断）
+        HomeworkStatus status = HomeworkStatus.ONGOING;
+        if (deadline.isBefore(LocalDateTime.now())) {
+            status = HomeworkStatus.COMPLETED;  // 已过期的作业状态为已完成
+        }
+        
+        // 4. 创建作业
         Homework homework = Homework.builder()
             .name(name)
             .description(description)
             .course(course)
             .questionCount(0)
             .totalScore(totalScore)
-            .status(HomeworkStatus.ONGOING)
+            .status(status)
             .deadline(deadline)
+            .knowledgePointIds(knowledgePointIds)  // 设置知识点ID列表
             .createdAt(LocalDateTime.now())
             .build();
         
         homeworkRepository.save(homework);
-        log.info("作业插入成功");
+        log.info("作业导入成功 - 名称：{}，课程：{}，截止时间：{}", name, courseId, deadline);
     }
 
     // ==================== 6. AI解析作业成绩文件 ====================
-    public List<FieldMapping> getHomeworkGradeFieldMappings() {
+    public List<FieldMapping> getHomeworkGradeParseFieldMappings() {
         List<FieldMapping> mappings = new ArrayList<>();
         
+         // 学生（必填，可用学号或姓名）
         FieldMapping studentName = new FieldMapping();
         studentName.setTargetField("studentName");
         studentName.setFieldDescription("学生姓名或学号");
-        studentName.setPossibleNames(Arrays.asList("学生", "学生姓名", "姓名", "学号", "Student"));
+        studentName.setPossibleNames(Arrays.asList("学生", "学生姓名", "姓名", "学号", "Student", "Student Name", "StudentNo"));
         studentName.setRequired(true);
         studentName.setDataType("string");
         studentName.setNeedExist(true);
         mappings.add(studentName);
         
+       // 成绩（必填）
         FieldMapping score = new FieldMapping();
         score.setTargetField("score");
         score.setFieldDescription("作业得分");
@@ -561,6 +879,7 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         score.setDataType("number");
         mappings.add(score);
         
+        // 批注（可选）
         FieldMapping feedback = new FieldMapping();
         feedback.setTargetField("feedback");
         feedback.setFieldDescription("评语");
@@ -571,6 +890,44 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         
         return mappings;
     }
+
+    /**
+ * 作业成绩导入阶段字段映射 - 用于验证前端传来的数据
+ * （与解析阶段基本相同，因为字段名一致）
+ */
+public List<FieldMapping> getHomeworkGradeImportFieldMappings() {
+    List<FieldMapping> mappings = new ArrayList<>();
+
+    // 学生（必填）
+    FieldMapping studentName = new FieldMapping();
+    studentName.setTargetField("studentName");
+    studentName.setFieldDescription("学生姓名或学号");
+    studentName.setPossibleNames(Arrays.asList("studentName", "学生"));
+    studentName.setRequired(true);
+    studentName.setDataType("string");
+    studentName.setNeedExist(true);
+    mappings.add(studentName);
+
+    // 成绩（必填）
+    FieldMapping score = new FieldMapping();
+    score.setTargetField("score");
+    score.setFieldDescription("作业得分");
+    score.setPossibleNames(Arrays.asList("score", "成绩"));
+    score.setRequired(true);
+    score.setDataType("number");
+    mappings.add(score);
+
+    // 批注（可选）
+    FieldMapping feedback = new FieldMapping();
+    feedback.setTargetField("feedback");
+    feedback.setFieldDescription("评语");
+    feedback.setPossibleNames(Arrays.asList("feedback", "批注"));
+    feedback.setRequired(false);
+    feedback.setDataType("string");
+    mappings.add(feedback);
+
+    return mappings;
+}
 
      /**
      * 构建错误消息
@@ -588,8 +945,9 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
      */
     @Transactional
     public HomeworkGradeImportResultVO confirmHomeworkGradeImport(Long homeworkId, List<Map<String, Object>> data) {
-        List<FieldMapping> mappings = getHomeworkGradeFieldMappings();
-      
+        List<FieldMapping> mappings = getHomeworkGradeImportFieldMappings();
+    
+        // 1. 验证数据
         List<ValidationError> errors = deepSeekService.validateData(data, mappings);
         if (!errors.isEmpty()) {
             log.error("数据验证失败：{}", errors);
@@ -599,51 +957,64 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
                 .build();
         }
 
-           Homework homework = homeworkRepository.findById(homeworkId)
+        // 2. 查询作业
+        Homework homework = homeworkRepository.findById(homeworkId)
             .orElseThrow(() -> new RuntimeException("作业不存在"));
-    
+        
+        // 3. 批量导入成绩
         int successCount = 0;
         int failCount = 0;
         int updateCount = 0;
         List<Submission> savedSubmissions = new ArrayList<>();
         StringBuilder resultMsg = new StringBuilder();
     
-        for (Map<String, Object> row : data) {
-            try {
-                String studentIdentifier = (String) row.get("studentName");
-                Student student = findStudentByIdentifier(studentIdentifier);
-                if (student == null) {
-                    throw new RuntimeException("学生不存在: " + studentIdentifier);
-                }
-                Submission submission = insertOrUpdateSubmission(homework, row, student);
-                savedSubmissions.add(submission);
-                successCount++;
-            if (submission.getId() != null && submissionRepository.findById(submission.getId()).isPresent()) {
-                    updateCount++;
-                }
-                log.info("成功导入成绩 - 学生：{}，成绩：{}", row.get("studentName"), row.get("score"));
+        for (int i = 0; i < data.size(); i++) {
+        Map<String, Object> row = data.get(i);
+        try {
+            // 查找学生
+            String studentIdentifier = (String) row.get("studentName");
+            Student student = findStudentByIdentifier(studentIdentifier);
+            if (student == null) {
+                throw new RuntimeException("学生不存在: " + studentIdentifier);
+            }
+            
+            // 判断是新增还是更新
+            Submission existing = submissionRepository.findByHomeworkAndStudent(homework, student);
+            if (existing != null) {
+                updateCount++;
+            }
+            
+            Submission submission = insertOrUpdateSubmission(homework, row, student);
+            savedSubmissions.add(submission);
+            successCount++;
+            log.info("成功导入作业成绩 - 第{}行，学生：{}，成绩：{}", 
+                i + 1, row.get("studentName"), row.get("score"));
+                
             } catch (Exception e) {
                 failCount++;
-                String errorMsg = String.format("导入失败 - 学生：%s，原因：%s",
-                    row.get("studentName"), e.getMessage());
+                String errorMsg = String.format("第%d行 - 学生：%s，原因：%s",
+                    i + 1, row.get("studentName"), e.getMessage());
                 log.error(errorMsg);
                 resultMsg.append(errorMsg).append("\n");
             }
         }
-    
-        // 更新作业统计
-        updateHomeworkStatistics(homework);
 
-     // 处理作业成绩并更新知识点掌握度（触发AI分析）
+        // 4. 更新作业统计（平均分、及格率）
+        updateHomeworkStatistics(homework);
+        
+        // 5. 检查是否需要更新作业状态（全部学生都已批改）
+        updateHomeworkStatusIfComplete(homework);
+        
+        // 6. 处理知识点掌握度并触发AI分析
         boolean aiCompleted = processHomeworkGradesAndUpdateMastery(homework, savedSubmissions);
-    
+        
         String summary = String.format("导入完成！成功：%d条（新增%d条，更新%d条），失败：%d条", 
             successCount, successCount - updateCount, updateCount, failCount);
         if (failCount > 0) {
             summary = summary + "\n" + resultMsg.toString();
         }
         log.info(summary);
-    
+
         return HomeworkGradeImportResultVO.builder()
             .homeworkId(homeworkId)
             .totalImported(data.size())
@@ -656,38 +1027,81 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
             .build();
     }
 
+    /**
+     * 更新作业统计（平均分、及格率）
+     */
+    private void updateHomeworkStatistics(Homework homework) {
+        List<Submission> submissions = submissionRepository.findGradedByHomeworkId(homework.getId());
+        if (submissions.isEmpty()) return;
+        
+        double avg = submissions.stream()
+            .mapToDouble(s -> s.getScore() != null ? s.getScore() : 0)
+            .average()
+            .orElse(0);
+        
+        long passCount = submissions.stream()
+            .filter(s -> s.getScore() != null && s.getScore() >= 60)
+            .count();
+        
+        homework.setAvgScore(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP));
+        homework.setPassRate(BigDecimal.valueOf(passCount * 100.0 / submissions.size()).setScale(2, RoundingMode.HALF_UP));
+        homeworkRepository.save(homework);
+    }
+
+    /**
+     * 检查并更新作业状态（全部学生都已批改时，状态变为COMPLETED）
+     */
+    private void updateHomeworkStatusIfComplete(Homework homework) {
+        // 获取该课程所有选课学生数
+        int totalStudents = (int) studentRepository.countByEnrollmentsCourse(homework.getCourse());
+        // 获取已批改的学生数
+        int gradedCount = (int) submissionRepository.countByHomeworkIdAndStatusNot(
+            homework.getId(), SubmissionStatus.PENDING);
+        
+        // 如果全部学生都已批改，状态变为COMPLETED
+        if (gradedCount >= totalStudents && totalStudents > 0) {
+            homework.setStatus(HomeworkStatus.COMPLETED);
+            homeworkRepository.save(homework);
+            log.info("作业 {} 所有学生已批改，状态更新为COMPLETED", homework.getName());
+        }
+    }
+
 
    private Submission insertOrUpdateSubmission(Homework homework, Map<String, Object> row, Student student) {
-    Double score = ((Number) row.get("score")).doubleValue();
-    String feedback = (String) row.get("feedback");
+        Double score = ((Number) row.get("score")).doubleValue();
+        String feedback = (String) row.get("feedback");
     
-    // 自动创建选课记录
-    ensureEnrollment(student, homework.getCourse());
+        // 1. 自动创建选课记录
+        ensureEnrollment(student, homework.getCourse());
+        
+        // 2. 查找已有提交记录
+        Submission submission = submissionRepository.findByHomeworkAndStudent(homework, student);
+        boolean isNew = (submission == null);
     
-    Submission submission = submissionRepository.findByHomeworkAndStudent(homework, student);
-    boolean isNew = (submission == null);
+        if (isNew) {
+            submission = new Submission();
+            submission.setHomework(homework);
+            submission.setStudent(student);
+            submission.setStatus(SubmissionStatus.GRADED);
+            submission.setSubmittedAt(LocalDateTime.now());
+        }
     
-    if (isNew) {
-        submission = new Submission();
-        submission.setHomework(homework);
-        submission.setStudent(student);
-        submission.setStatus(SubmissionStatus.GRADED);
-        submission.setSubmittedAt(LocalDateTime.now());
-    }
-    
-    submission.setScore(score);
-    submission.setFeedback(feedback);
+        // 3. 设置批改信息
+        submission.setScore(score);
+        submission.setFeedback(feedback);
+        submission.setGradedAt(LocalDateTime.now());
 
-    Submission saved = submissionRepository.save(submission);
-    
-    // ========== 新增：同步作业提交活动记录 ==========
-    try {
-        activitySyncService.syncHomeworkActivity(student, homework, score);
-    } catch (Exception e) {
-        log.error("同步作业活动记录失败", e);
-    }
-    
-    return saved;
+        // 4. 保存提交记录
+        Submission saved = submissionRepository.save(submission);
+        
+        // 5. 同步活动记录
+        try {
+            activitySyncService.syncHomeworkActivity(student, homework, score);
+        } catch (Exception e) {
+            log.error("同步作业活动记录失败", e);
+        }
+        
+        return saved;
 }
  /**
      * 处理作业成绩并更新知识点掌握度
@@ -702,13 +1116,13 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
                 return false;
             }
 
-       List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
+            List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
             if (kps.isEmpty()) {
                 log.warn("未找到知识点信息，跳过掌握度计算");
                 return false;
             }
 
-            // 1. 更新学生知识点掌握度（原有逻辑保留）
+             // 1. 更新学生知识点掌握度
             for (Submission submission : submissions) {
                 Student student = submission.getStudent();
                 Double submissionScore = submission.getScore();
@@ -724,14 +1138,14 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
             }
             // 2. 使用统一服务生成AI分析报告（自动保存）
             AiSuggestionDTO aiResult = unifiedAiAnalysisService.getOrCreateAnalysis(
-                "HOMEWORK",          // targetType: 作业类型
-                homework.getId(),    // targetId: 作业ID
-                "HOMEWORK_ANALYSIS", // reportType: 作业分析
-                true                 // 强制刷新（因为刚导入新数据）
+                "HOMEWORK",                    // targetType: 作业类型
+                homework.getId(),              // targetId: 作业ID
+                "HOMEWORK_ANALYSIS",           // reportType: 作业分析
+                true                           // 强制刷新
             );
             
-            log.info("作业成绩AI分析完成，作业ID: {}, 摘要: {}", homework.getId(), 
-                aiResult != null ? aiResult.getSummary() : "无");
+            log.info("作业成绩AI分析完成，作业ID: {}, 摘要: {}", 
+                homework.getId(), aiResult != null ? aiResult.getSummary() : "无");
             
             return true;
             
@@ -797,25 +1211,6 @@ private void saveKnowledgePointScoreDetail(Student student, KnowledgePoint kp,
                 student.getUser().getName(), course.getName());
         }
     }
-
-    private void updateHomeworkStatistics(Homework homework) {
-        List<Submission> submissions = submissionRepository.findGradedByHomeworkId(homework.getId());
-        if (submissions.isEmpty()) return;
-        
-        double avg = submissions.stream()
-            .mapToInt(s -> s.getScore() != null ? s.getScore().intValue() : 0)
-            .average()
-            .orElse(0);
-        
-        long passCount = submissions.stream()
-            .filter(s -> s.getScore() != null && s.getScore() >= 60)
-            .count();
-        
-        homework.setAvgScore(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP));
-        homework.setPassRate(BigDecimal.valueOf(passCount * 100.0 / submissions.size()).setScale(2, RoundingMode.HALF_UP));
-        homeworkRepository.save(homework);
-    }
-
     @Transactional
     public void deleteHomework(Long homeworkId, Long currentUserId, String userRole) {
         Homework homework = homeworkRepository.findById(homeworkId)
