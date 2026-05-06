@@ -517,30 +517,15 @@ private List<ExamKnowledgePointDTO> buildKnowledgePointAnalysis(Exam exam) {
         // 从 knowledge_point_score_detail 表获取班级平均得分率
         BigDecimal classAvgRate = getKnowledgePointClassAvgScore(exam.getId(), kp.getId());
         
-        String level;
-        String suggestion;
-        if (classAvgRate.doubleValue() >= 70) {
-            level = "GOOD";
-            suggestion = "🟢 该知识点掌握良好，得分率" + classAvgRate + "%，继续保持";
-        } else if (classAvgRate.doubleValue() >= 50) {
-            level = "MODERATE";
-            suggestion = "🟡 该知识点掌握中等，得分率" + classAvgRate + "%，需加强练习";
-        } else {
-            level = "WEAK";
-            suggestion = "🔴 该知识点班级掌握薄弱，得分率仅" + classAvgRate + "%，建议安排专项复习";
-        }
-        
         result.add(ExamKnowledgePointDTO.builder()
             .knowledgePointId(kp.getId())
             .knowledgePointName(kp.getName())
             .fullScore(10)  // 满分10分制，可根据需要调整
-            .classAvgRate(classAvgRate)
-            .level(level)
-            .suggestion(suggestion)
+            .classAvgScore(classAvgRate)
             .build());
     }
     
-    result.sort((a, b) -> a.getClassAvgRate().compareTo(b.getClassAvgRate()));
+    result.sort((a, b) -> a.getClassAvgScore().compareTo(b.getClassAvgScore()));
     return result;
 }
     /**

@@ -29,7 +29,9 @@ import com.edu.repository.KnowledgePointRepository;
 import com.edu.repository.KnowledgePointScoreDetailRepository;
 import com.edu.repository.StudentRepository;
 import com.edu.repository.SubmissionRepository;
-
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import java.util.*;
 
 @Service
@@ -45,29 +47,22 @@ public class StudentHomeworkAnalysisService {
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
     private final StudentRepository studentRepository;
     
-    public List<StudentHomeworkDTO> getStudentHomeworkList(Long studentId, Long courseId, String status) {
+    public Page<StudentHomeworkDTO> getStudentHomeworkList(Long studentId, Long courseId, Integer pageNum, Integer pageSize) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
+
+         Pageable pageable = PageRequest.of(
+            pageNum != null ? pageNum : 0,
+            pageSize != null ? pageSize : 10
+        );
     
-        
-        List<Homework> homeworks;
+        Page<Homework> homeworks;
         if (courseId != null && courseId > 0) {
-            homeworks = homeworkRepository.findByStudentIdAndCourseId(studentId, courseId);
+            homeworks = homeworkRepository.findByStudentIdAndCourseIdByPageable(studentId, courseId, pageable);
         } else {
-            homeworks = homeworkRepository.findByStudentId(studentId);
+            homeworks = homeworkRepository.findByStudentIdByPageable(studentId, pageable);
         }
-        
-        if (status != null && !status.isEmpty()) {
-            homeworks = homeworks.stream()
-                    .filter(h -> h.getStatus().equals(status))
-                    .collect(Collectors.toList());
-        }
-        
-        List<StudentHomeworkDTO> result = new ArrayList<>();
-        for (Homework homework : homeworks) {
-            result.add(convertToStudentHomeworkDTO(homework, studentId));
-        }
-        return result;
+       return homeworks.map(homework -> convertToStudentHomeworkDTO(homework, studentId));
     }
     
     @Transactional
@@ -86,52 +81,50 @@ public class StudentHomeworkAnalysisService {
         detail.setCourseName(homework.getCourse().getName());
         detail.setCourseId(homework.getCourse().getId());
         detail.setTotalScore(homework.getTotalScore());
-        detail.setQuestionCount(homework.getQuestionCount());
         detail.setStatus(homework.getStatus().toString());
         detail.setDeadline(homework.getDeadline());
-        detail.setCreatedAt(homework.getCreatedAt());
-        
+
         detail.setMySubmission(getMySubmissionInfo(studentId, homework));
         detail.setClassStats(getClassStatistics(homework));
         detail.setKnowledgePointAnalysis(getKnowledgePointAnalysis(studentId, homework));
         detail.setScoreAnalysis(getScoreAnalysis(studentId, homework));
-        detail.setAiSuggestion(getOrCreateAiSuggestion(student, homework));
         
         return detail;
     }
     
-    public HomeworkStatisticsCards getStudentStatisticsCards(Long studentId) {
+    public HomeworkStatisticsCards getStudentStatisticsCards(Long studentId, Long courseId) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
         
         HomeworkStatisticsCards cards = new HomeworkStatisticsCards();
-        
-        List<Submission> gradedSubmissions = submissionRepository.findGradedByStudentId(studentId);
+
+        List<Homework>  homeworks;
+         List<Submission> submissions;
+        if (courseId != null && courseId > 0) {
+            homeworks = homeworkRepository.findByStudentIdAndCourseId(studentId, courseId);
+             submissions = submissionRepository.findByStudentIdAndCourseId(studentId, courseId);
+        } else {
+            homeworks = homeworkRepository.findByStudentId(studentId);
+            submissions = submissionRepository.findByStudent(student);
+        }
         
         long totalHomework = 0;
+        long completedHomework = 0;
        
-        totalHomework = homeworkRepository.findByStudentId(student.getId()).size();
+        totalHomework = homeworks.size();
+        completedHomework=submissions.size();
         cards.setTotalCount(totalHomework);
-        cards.setCompletedCount((long) gradedSubmissions.size());
+        cards.setCompletedCount(completedHomework);
         
-        double avgScore = gradedSubmissions.stream()
+        double avgScore = submissions.stream()
                 .filter(s -> s.getScore() != null)
                 .mapToDouble(Submission::getScore)
                 .average()
                 .orElse(0);
         cards.setAvgScore(BigDecimal.valueOf(avgScore).setScale(2, RoundingMode.HALF_UP));
-        
-        cards.setCompletionRate(totalHomework > 0 ?
-                BigDecimal.valueOf(gradedSubmissions.size() * 100.0 / totalHomework).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
-        
-        long onTimeCount = gradedSubmissions.stream()
-                .filter(s -> s.getSubmissionLateMinutes() == null || s.getSubmissionLateMinutes() == 0)
-                .count();
-        cards.setOnTimeRate(gradedSubmissions.size() > 0 ?
-                BigDecimal.valueOf(onTimeCount * 100.0 / gradedSubmissions.size()).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
-        
+  
         long aboveAvgCount = 0;
-        for (Submission sub : gradedSubmissions) {
+        for (Submission sub : submissions) {
             Homework homework = sub.getHomework();
             BigDecimal classAvg = homework.getAvgScore();
             if (classAvg != null && sub.getScore() != null && sub.getScore() > classAvg.doubleValue()) {
@@ -139,26 +132,25 @@ public class StudentHomeworkAnalysisService {
             }
         }
         cards.setAboveAvgCount(aboveAvgCount);
-        cards.setAboveAvgRate(gradedSubmissions.size() > 0 ?
-                BigDecimal.valueOf(aboveAvgCount * 100.0 / gradedSubmissions.size()).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO);
-        
         return cards;
     }
     
     public HomeworkTrendData getStudentTrendData(Long studentId, Long courseId) {
+        Student student = studentService.findById(studentId)
+                .orElseThrow(() -> new RuntimeException("学生不存在"));
         HomeworkTrendData trendData = new HomeworkTrendData();
         
         List<Submission> submissions;
         String courseName = "全部课程";
         
         if (courseId != null && courseId > 0) {
-            submissions = submissionRepository.findByStudentIdAndCourseIdGraded(studentId, courseId);
+            submissions = submissionRepository.findByStudentIdAndCourseId(studentId, courseId);
             Course course = courseService.findById(courseId).orElse(null);
             if (course != null) {
                 courseName = course.getName();
             }
         } else {
-            submissions = submissionRepository.findGradedByStudentId(studentId);
+            submissions = submissionRepository.findByStudent(student);
         }
         
         submissions.sort(Comparator.comparing(Submission::getSubmittedAt));
@@ -375,20 +367,12 @@ public class StudentHomeworkAnalysisService {
         return result;
     }
     
-    // 2. 获取知识点信息
+    // 获取知识点信息
     List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
-
-     // 3. 获取班级ID（用于计算班级平均分）
-    Long classId = null;
-    // 通过作业的课程找到选修该课程的学生，再获取班级
-    List<Student> students = studentRepository.findByEnrollmentsCourse(homework.getCourse());
-    if (students != null && !students.isEmpty() && students.get(0).getClassInfo() != null) {
-        classId = students.get(0).getClassInfo().getId();
-    }
     
-    // 4. 遍历知识点
+    // 遍历知识点
     for (KnowledgePoint kp : kps) {
-        // 4.1 获取该学生在本次作业中该知识点的得分率
+        // 获取该学生在本次作业中该知识点的得分率
         List<KnowledgePointScoreDetail> details = kpScoreDetailRepository
             .findBySourceTypeAndSourceIdAndKnowledgePointId("HOMEWORK", homework.getId(), kp.getId());
  BigDecimal myRate = BigDecimal.ZERO;
@@ -399,39 +383,18 @@ public class StudentHomeworkAnalysisService {
             }
         }
         
-        // 4.2 获取班级平均得分率
-        BigDecimal classAvgRate = BigDecimal.ZERO;
-        if (classId != null) {
-            classAvgRate = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-            if (classAvgRate == null) classAvgRate = BigDecimal.ZERO;
-        }
-        
+      
       // 4.3 构建 DTO
         KnowledgePointMasteryDTO dto = new KnowledgePointMasteryDTO();
         dto.setKnowledgePointId(kp.getId());
         dto.setKnowledgePointName(kp.getName());
         dto.setMyScore((int)(myRate.doubleValue() / 10));
         dto.setFullScore(10);
-        dto.setScoreRate(myRate);
-        dto.setClassAvgRate(classAvgRate);
-        
-        // 等级判断
-        double rateValue = myRate.doubleValue();
-        if (rateValue >= 80) {
-            dto.setLevel("GOOD");
-            dto.setSuggestion("✅ 掌握良好，继续保持");
-        } else if (rateValue >= 60) {
-            dto.setLevel("MODERATE");
-            dto.setSuggestion("📚 基本掌握，建议加强练习");
-        } else {
-            dto.setLevel("WEAK");
-            dto.setSuggestion("🔴 薄弱知识点，需要重点复习");
-        }
         
        result.add(dto);
         }
     
-    result.sort(Comparator.comparing(KnowledgePointMasteryDTO::getScoreRate));
+    result.sort(Comparator.comparing(KnowledgePointMasteryDTO::getMyScore));
     return result;
     }
     

@@ -20,6 +20,6 @@ springdoc:
     # 自定义 deepseek 配置
 deepseek:
   api:
-    key:
+    key: sk-8c6c3eadef4b452bbf6b8c4ba3dcbddb
     url: https://api.deepseek.com/v1/chat/completions
     model: deepseek-chat

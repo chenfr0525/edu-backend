@@ -11,7 +11,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -54,40 +53,31 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
     List<Exam> findByStudentIdAndCompleted(@Param("studentId") Long studentId);
     
     /**
-     * 获取学生某课程的所有考试
-     */
-    @Query("SELECT e FROM Exam e " +
-           "WHERE e.classInfo.id IN (" +
-           "  SELECT s.classInfo.id FROM Student s WHERE s.id = :studentId" +
-           ") " +
-           "AND e.course.id = :courseId " +
-           "ORDER BY e.examDate DESC")
+ * 获取学生某课程的考试（完全基于选课）
+ */
+@Query("SELECT e FROM Exam e " +
+       "WHERE e.course.id = :courseId " +
+       "AND e.course.id IN (" +
+       "  SELECT en.course.id FROM Enrollment en " +
+       "  WHERE en.student.id = :studentId" +
+       ") " +
+       "ORDER BY e.examDate DESC")
     List<Exam> findByStudentIdAndCourseId(@Param("studentId") Long studentId, 
                                            @Param("courseId") Long courseId);
     
                                             /**
-     * 根据学生ID获取
-     */
-    @Query("SELECT e FROM Exam e " +
-           "WHERE e.classInfo.id IN (" +
-           "  SELECT s.classInfo.id FROM Student s WHERE s.id = :studentId" +
-           ") " +
-           "ORDER BY e.examDate ASC")
+     /**
+ * 获取学生所有课程的考试（完全基于选课）
+ */
+@Query("SELECT e FROM Exam e " +
+       "WHERE e.course.id IN (" +
+       "  SELECT en.course.id FROM Enrollment en " +
+       "  WHERE en.student.id = :studentId" +
+       ") " +
+       "ORDER BY e.examDate ASC")
     List<Exam> findByStudentId(@Param("studentId") Long studentId);
 
-    /**
-     * 获取即将到来的考试
-     */
-    @Query("SELECT e FROM Exam e " +
-           "WHERE e.classInfo.id IN (" +
-           "  SELECT s.classInfo.id FROM Student s WHERE s.id = :studentId" +
-           ") " +
-           "AND e.examDate >= CURRENT_DATE " +
-           "AND e.status != 'COMPLETED' " +
-           "ORDER BY e.examDate ASC")
-    List<Exam> findUpcomingByStudentId(@Param("studentId") Long studentId);
-
-    /**
+ /**
  * 根据班级列表查询考试（分页）
  */
 @Query("SELECT e FROM Exam e WHERE e.classInfo.id IN :classIds")

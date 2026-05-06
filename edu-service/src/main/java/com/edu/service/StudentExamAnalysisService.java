@@ -5,30 +5,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
-import com.alibaba.fastjson.JSONObject;
-import com.edu.common.PageResult;
-import com.edu.domain.AiAnalysisReport;
 import com.edu.domain.Course;
 import com.edu.domain.Exam;
 import com.edu.domain.ExamGrade;
 import com.edu.domain.KnowledgePoint;
 import com.edu.domain.KnowledgePointScoreDetail;
-import com.edu.domain.Semester;
 import com.edu.domain.Student;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.ExamClassStatisticsDTO;
@@ -95,8 +86,8 @@ public class StudentExamAnalysisService {
     /**
      * 1. 获取学生的考试列表（分页）- 保持不变
      */
-    public PageResult<StudentExamDTO> getStudentExamListPage(
-            Long studentId, Long courseId, String status, int pageNum, int pageSize) {
+    public List<StudentExamDTO> getStudentExamList(
+            Long studentId, Long courseId) {
         // ... 保持不变 ...
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
@@ -113,12 +104,7 @@ public class StudentExamAnalysisService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
         
-        int total = allDTOs.size();
-        int start = (pageNum - 1) * pageSize;
-        int end = Math.min(start + pageSize, total);
-     
-        List<StudentExamDTO> examList = allDTOs.subList(start, end);
-        return new PageResult<>(examList, (long) total, pageNum, pageSize);
+        return allDTOs;
     }
     
     /**
@@ -141,16 +127,12 @@ public class StudentExamAnalysisService {
         detail.setCourseName(exam.getCourse().getName());
         detail.setCourseId(exam.getCourse().getId());
         detail.setExamDate(exam.getExamDate());
-        detail.setStartTime(exam.getStartTime() != null ? exam.getStartTime().toString() : null);
-        detail.setEndTime(exam.getEndTime() != null ? exam.getEndTime().toString() : null);
-        detail.setDuration(exam.getDuration());
         detail.setFullScore(exam.getFullScore());
         detail.setPassScore(exam.getPassScore());
         detail.setLocation(exam.getLocation());
         detail.setStatus(exam.getStatus().toString());
         
         detail.setMyGrade(getMyExamGradeInfo(studentId, exam));
-        detail.setClassStats(getExamClassStatistics(exam));
         detail.setKnowledgePointAnalysis(getExamKnowledgePointAnalysis(studentId, exam));
         detail.setScoreAnalysis(getExamScoreAnalysis(studentId, exam));
         return detail;
@@ -159,21 +141,31 @@ public class StudentExamAnalysisService {
     /**
      * 3. 获取学生考试统计卡片 - 保持不变
      */
-    public ExamStatisticsCards getStudentExamStatisticsCards(Long studentId) {
-        // ... 保持不变 ...
+    public ExamStatisticsCards getStudentExamStatisticsCards(Long studentId, Long courseId) {
         Student student = studentService.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("学生不存在"));
-        
+
         ExamStatisticsCards cards = new ExamStatisticsCards();
-        
-        List<ExamGrade> examGrades = examGradeRepository.findAllByStudentIdOrderByDateAsc(studentId);
-        
+
+         List<Exam> allExams;
+         List<ExamGrade> examGrades;
+        if (courseId != null && courseId > 0) {
+            allExams = examRepository.findByStudentIdAndCourseId(studentId, courseId);
+            examGrades = examGradeRepository.findByStudentIdAndCourseIdOrderByDateAsc(studentId, courseId);
+        } else {
+            allExams = examRepository.findByStudentId(studentId);
+            examGrades = examGradeRepository.findAllByStudentIdOrderByDateAsc(studentId);
+        }
+        long totalExam = 0;
+        long completedExam = 0;
+        totalExam = allExams.size();
+        completedExam = examGrades.size();
+        cards.setCompletedExams((int)completedExam);
+        cards.setTotalExams((int)totalExam);
+
         if (examGrades.isEmpty()) {
             cards.setAvgScore(BigDecimal.ZERO);
-            cards.setAvgRank(BigDecimal.ZERO);
-            cards.setTotalExams(0);
             cards.setAboveAvgCount(0);
-            cards.setAboveAvgRate(BigDecimal.ZERO);
             return cards;
         }
         
@@ -183,23 +175,8 @@ public class StudentExamAnalysisService {
                 .orElse(0);
         cards.setAvgScore(BigDecimal.valueOf(avgScore).setScale(2, RoundingMode.HALF_UP));
         
-        double avgRank = examGrades.stream()
-                .filter(eg -> eg.getClassRank() != null)
-                .mapToInt(ExamGrade::getClassRank)
-                .average()
-                .orElse(0);
-        cards.setAvgRank(BigDecimal.valueOf(avgRank).setScale(2, RoundingMode.HALF_UP));
-        
-        cards.setTotalExams(examGrades.size());
-        
         long aboveAvgCount = examGradeRepository.countAboveClassAvg(studentId);
         cards.setAboveAvgCount((int)aboveAvgCount);
-        cards.setAboveAvgRate(BigDecimal.valueOf(aboveAvgCount * 100.0 / examGrades.size())
-                .setScale(2, RoundingMode.HALF_UP));
-        
-        cards.setBestSubject("待计算");
-        cards.setWeakestSubject("待计算");
-        
         return cards;
     }
     
@@ -207,7 +184,6 @@ public class StudentExamAnalysisService {
      * 4. 获取学生考试趋势图数据 - 保持不变
      */
     public ExamTrendData getStudentExamTrendData(Long studentId, Long courseId) {
-        // ... 保持不变 ...
         ExamTrendData trendData = new ExamTrendData();
         
         List<ExamGrade> examGrades;
@@ -338,12 +314,10 @@ public class StudentExamAnalysisService {
         ExamGrade g = grade.get();
         dto.setMyScore(g.getScore());
         dto.setClassRank(g.getClassRank());
-        dto.setScoreTrend(g.getScoreTrend());
     } else {
         // 没有成绩时设置默认值
         dto.setMyScore(null);
         dto.setClassRank(null);
-        dto.setScoreTrend(null);
         log.debug("学生 {} 在考试 {} 中没有成绩记录", studentId, exam.getId());
     }
     
@@ -368,41 +342,6 @@ public class StudentExamAnalysisService {
         return info;
     }
     
-    private ExamClassStatisticsDTO getExamClassStatistics(Exam exam) {
-        ExamClassStatisticsDTO stats = new ExamClassStatisticsDTO();
-        
-        List<Integer> scores = examGradeRepository.findScoresByExamId(exam.getId());
-        
-        if (scores.isEmpty()) {
-            stats.setTotalStudents(0);
-            stats.setAvgScore(BigDecimal.ZERO);
-            stats.setHighestScore(BigDecimal.ZERO);
-            stats.setLowestScore(BigDecimal.ZERO);
-            stats.setPassRate(BigDecimal.ZERO);
-            stats.setExcellentRate(BigDecimal.ZERO);
-            return stats;
-        }
-        
-        stats.setTotalStudents(scores.size());
-        
-        double avg = scores.stream().mapToInt(Integer::intValue).average().orElse(0);
-        int max = scores.stream().mapToInt(Integer::intValue).max().orElse(0);
-        int min = scores.stream().mapToInt(Integer::intValue).min().orElse(0);
-        
-        stats.setAvgScore(BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP));
-        stats.setHighestScore(BigDecimal.valueOf(max));
-        stats.setLowestScore(BigDecimal.valueOf(min));
-        
-        long passCount = scores.stream().filter(s -> s >= 60).count();
-        long excellentCount = scores.stream().filter(s -> s >= 80).count();
-        stats.setPassRate(BigDecimal.valueOf(passCount * 100.0 / scores.size())
-                .setScale(2, RoundingMode.HALF_UP));
-        stats.setExcellentRate(BigDecimal.valueOf(excellentCount * 100.0 / scores.size())
-                .setScale(2, RoundingMode.HALF_UP));
-        
-        return stats;
-    }
-    
    private List<ExamKnowledgePointDTO> getExamKnowledgePointAnalysis(Long studentId, Exam exam) {
         List<ExamKnowledgePointDTO> result = new ArrayList<>();
     
@@ -422,11 +361,7 @@ public class StudentExamAnalysisService {
         // 2. 获取知识点信息
         List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
     
-        // 3. 获取班级ID（用于计算班级平均分）
-        Long classId = null;
-        if (exam.getClassInfo() != null) {
-            classId = exam.getClassInfo().getId();
-        }
+    
 
          // 4. 遍历知识点，从 knowledge_point_score_detail 获取数据
     for (KnowledgePoint kp : kps) {
@@ -442,37 +377,14 @@ public class StudentExamAnalysisService {
                 break;
             }
         }
-   // 4.2 获取班级平均得分率
-        BigDecimal classAvgRate = BigDecimal.ZERO;
-        if (classId != null) {
-            classAvgRate = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-            if (classAvgRate == null) classAvgRate = BigDecimal.ZERO;
-        }
-        
         // 4.3 计算等级和建议（基于得分率）
         double myRateValue = myRate.doubleValue();
-        String level;
-        String suggestion;
-        if (myRateValue >= 80) {
-            level = "GOOD";
-            suggestion = "✅ 掌握良好，继续保持";
-        } else if (myRateValue >= 60) {
-            level = "MODERATE";
-            suggestion = "📚 基本掌握，建议加强练习";
-        } else {
-            level = "WEAK";
-            suggestion = "🔴 薄弱知识点，需要重点复习";
-        }
     // 4.4 构建 DTO
         ExamKnowledgePointDTO dto = ExamKnowledgePointDTO.builder()
             .knowledgePointId(kp.getId())
             .knowledgePointName(kp.getName())
             .fullScore(10)  // 10分制
             .myScore((int) (myRateValue / 10))  // 百分制转10分制
-            .scoreRate(myRate)
-            .classAvgRate(classAvgRate)
-            .level(level)
-            .suggestion(suggestion)
             .build();
         
         result.add(dto);
@@ -480,7 +392,7 @@ public class StudentExamAnalysisService {
     
     // 6. 排序（处理 null 值）
     result.sort(Comparator.comparing(
-        dto -> dto.getScoreRate() != null ? dto.getScoreRate() : BigDecimal.ZERO
+        dto -> dto.getMyScore() != null ? dto.getMyScore() : 0
     ));
     
     return result;

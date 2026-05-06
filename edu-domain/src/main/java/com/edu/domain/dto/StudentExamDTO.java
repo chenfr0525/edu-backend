@@ -20,5 +20,4 @@ public class StudentExamDTO {
     private BigDecimal classAvgScore; // 班级平均分
     private Integer classRank;        // 班级排名
     private String status;            // UPCOMING/ONGOING/COMPLETED
-    private String scoreTrend;        // UP/STABLE/DOWN
 }

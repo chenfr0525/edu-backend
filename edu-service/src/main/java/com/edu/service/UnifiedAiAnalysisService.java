@@ -724,7 +724,7 @@ private Map<String, BigDecimal> calculateHomeworkClassAvgRates(Homework homework
                 .targetId(targetId)
                 .reportType(reportType)
                 .dataHash(dataHash)
-                .analysisData(mapper.writeValueAsString(sourceData))
+                .analysisData(JSON.toJSONString(sourceData))
                 .summary(aiResponse.getSummary())
                 .suggestions(String.join("\n", aiResponse.getSuggestions()))
                 .strengths(mapper.writeValueAsString(aiResponse.getStrengths()))

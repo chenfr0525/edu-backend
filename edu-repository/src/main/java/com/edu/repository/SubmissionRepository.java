@@ -18,6 +18,16 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     
     // 查询某作业的所有提交
     List<Submission> findByHomework(Homework homework);
+
+    /**
+     * 获取学生某课程的所有提交
+     */
+    @Query("SELECT s FROM Submission s " +
+           "WHERE s.student.id = :studentId " +
+           "AND s.homework.course.id = :courseId "+
+           "ORDER BY s.submittedAt ASC")
+    List<Submission> findByStudentIdAndCourseId(@Param("studentId") Long studentId, 
+                                                       @Param("courseId") Long courseId);
  @Modifying
     @Query("DELETE FROM Submission skm WHERE skm.student.id = :studentId")
     void deleteByStudentId(Long studentId);

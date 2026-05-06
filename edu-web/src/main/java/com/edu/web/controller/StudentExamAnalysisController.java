@@ -10,6 +10,8 @@ import com.edu.domain.dto.StudentExamDetailDTO;
 import com.edu.service.StudentExamAnalysisService;
 import lombok.RequiredArgsConstructor;
 
+import java.util.List;
+
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -24,16 +26,14 @@ public class StudentExamAnalysisController {
      * GET /api/analysis/student/exam/list/{studentId}?courseId=&status=&pageNum=1&pageSize=10
      */
     @GetMapping("/list/{studentId}")
-    public Result<PageResult<StudentExamDTO>> getExamList(
+    public Result<List<StudentExamDTO>> getExamList(
             @PathVariable Long studentId,
-            @RequestParam(required = false) Long courseId,
-            @RequestParam(required = false) String status,
-            @RequestParam(defaultValue = "1") int pageNum,
-            @RequestParam(defaultValue = "10") int pageSize) {
+            @RequestParam(required = false) Long courseId) {
         
-        PageResult<StudentExamDTO> pageResult = analysisService.getStudentExamListPage(
-            studentId, courseId, status, pageNum, pageSize);
-        return Result.success(pageResult);
+       // 获取考试列表
+        List<StudentExamDTO> examList = analysisService.getStudentExamList(
+            studentId, courseId);
+        return Result.success(examList);
     }
 
     /**
@@ -54,8 +54,8 @@ public class StudentExamAnalysisController {
      * GET /api/analysis/student/exam/statistics/{studentId}
      */
     @GetMapping("/statistics/{studentId}")
-    public Result<ExamStatisticsCards> getStatisticsCards(@PathVariable Long studentId) {
-        ExamStatisticsCards statistics = analysisService.getStudentExamStatisticsCards(studentId);
+    public Result<ExamStatisticsCards> getStatisticsCards(@PathVariable Long studentId,@RequestParam(required = false) Long courseId) {
+        ExamStatisticsCards statistics = analysisService.getStudentExamStatisticsCards(studentId,courseId);
         return Result.success(statistics);
     }
 

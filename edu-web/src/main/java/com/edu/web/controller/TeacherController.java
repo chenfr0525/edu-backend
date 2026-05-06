@@ -1,18 +1,7 @@
 package com.edu.web.controller;
-
-import com.edu.common.Result;
-import com.edu.domain.*;
-import com.edu.domain.dto.TeacherStatsDTO;
-import com.edu.service.TeacherService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/teacher")

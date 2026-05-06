@@ -2,8 +2,6 @@ package com.edu.repository;
 
 import com.edu.domain.Homework;
 import com.edu.domain.HomeworkStatus;
-import com.edu.domain.KnowledgePoint;
-import com.edu.domain.Submission;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -98,6 +96,17 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
            "WHERE e.student.id = :studentId " +
            "ORDER BY h.deadline DESC")
     List<Homework> findByStudentId(@Param("studentId") Long studentId);
+
+     /**
+     * 获取学生的所有作业（分页）
+     */
+    @Query("SELECT DISTINCT h FROM Homework h " +
+           "JOIN h.course c " +
+           "JOIN Enrollment e ON e.course = c " +
+           "WHERE e.student.id = :studentId " +
+           "ORDER BY h.deadline DESC")
+    Page<Homework> findByStudentIdByPageable(@Param("studentId") Long studentId,
+                                    Pageable pageable);
     
     /**
      * 获取学生某课程的所有作业
@@ -110,4 +119,16 @@ public interface HomeworkRepository extends JpaRepository<Homework, Long> {
            "ORDER BY h.deadline DESC")
     List<Homework> findByStudentIdAndCourseId(@Param("studentId") Long studentId, 
                                                @Param("courseId") Long courseId);
+   /**
+     * 获取学生某课程的所有作业（分页）
+     */
+    @Query("SELECT h FROM Homework h " +
+           "JOIN h.course c " +
+           "JOIN Enrollment e ON e.course = c " +
+           "WHERE e.student.id = :studentId " +
+           "AND c.id = :courseId "+
+           "ORDER BY h.deadline DESC")
+    Page<Homework> findByStudentIdAndCourseIdByPageable(@Param("studentId") Long studentId, 
+                                               @Param("courseId") Long courseId,
+                                               Pageable pageable);
 }

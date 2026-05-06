@@ -46,7 +46,6 @@ public class StudentKnowledgeAnalysisService {
     private final StudentKnowledgeMasteryRepository masteryRepository;
     private final StudentService studentService;
     private final CourseService courseService;
-    private final AiAnalysisReportService aiReportService;
     private final ErrorRecordRepository errorRecordRepository;
     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
 
@@ -78,7 +77,7 @@ public class StudentKnowledgeAnalysisService {
    /**
  * 2. 获取知识点统计卡片
  */
-public KnowledgePointStatisticsCardsDTO getStatisticsCards(Long studentId) {
+public KnowledgePointStatisticsCardsDTO getStatisticsCards(Long studentId, Long courseId) {
     Student student = studentService.findById(studentId)
         .orElseThrow(() -> new RuntimeException("学生不存在"));
 
@@ -122,7 +121,7 @@ public KnowledgePointStatisticsCardsDTO getStatisticsCards(Long studentId) {
     Map<Long, List<Double>> courseScoresMap = new HashMap<>();
     
     for (KnowledgePointScoreDetail detail : details) {
-        Long courseId = detail.getKnowledgePoint().getCourse().getId();
+        // Long courseId = detail.getKnowledgePoint().getCourse().getId();
         double scoreRate = detail.getScoreRate().doubleValue();
         
         courseScoresMap.computeIfAbsent(courseId, k -> new ArrayList<>()).add(scoreRate);

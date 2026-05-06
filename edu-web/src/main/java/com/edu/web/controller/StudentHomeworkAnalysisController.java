@@ -1,20 +1,19 @@
 package com.edu.web.controller;
 
+import com.edu.common.PageResult;
 import com.edu.common.Result;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.domain.dto.HomeworkStatisticsCards;
 import com.edu.domain.dto.HomeworkTrendData;
 import com.edu.domain.dto.StudentHomeworkDTO;
 import com.edu.domain.dto.StudentHomeworkDetailDTO;
-import com.edu.repository.HomeworkRepository;
-import com.edu.service.AiAnalysisReportService;
 import com.edu.service.StudentHomeworkAnalysisService;
-import com.edu.service.StudentService;
 
 import lombok.RequiredArgsConstructor;
 
 import java.util.List;
-import java.util.Map;
+
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -24,13 +23,14 @@ public class StudentHomeworkAnalysisController {
    private final StudentHomeworkAnalysisService analysisService;
 
     @GetMapping("/list/{studentId}")
-    public Result<List<StudentHomeworkDTO>> getHomeworkList(
+    public Result<PageResult<StudentHomeworkDTO>> getHomeworkList(
             @PathVariable Long studentId,
             @RequestParam(required = false) Long courseId,
-            @RequestParam(required = false) String status) {
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
         
-        List<StudentHomeworkDTO> list = analysisService.getStudentHomeworkList(studentId, courseId, status);
-        return Result.success(list);
+        Page<StudentHomeworkDTO> page = analysisService.getStudentHomeworkList(studentId, courseId, pageNum, pageSize);
+        return Result.success(PageResult.of(page));
     }
 
     @GetMapping("/detail/{studentId}/{homeworkId}")
@@ -43,8 +43,8 @@ public class StudentHomeworkAnalysisController {
     }
 
     @GetMapping("/statistics/{studentId}")
-    public Result<HomeworkStatisticsCards> getStatisticsCards(@PathVariable Long studentId) {
-        HomeworkStatisticsCards statistics = analysisService.getStudentStatisticsCards(studentId);
+    public Result<HomeworkStatisticsCards> getStatisticsCards(@PathVariable Long studentId, @RequestParam(required = false) Long courseId) {
+        HomeworkStatisticsCards statistics = analysisService.getStudentStatisticsCards(studentId, courseId);
         return Result.success(statistics);
     }
 

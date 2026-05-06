@@ -38,8 +38,8 @@ public class StudentKnowledgeAnalysisController {
      * GET /api/analysis/student/knowledge/statistics/{studentId}
      */
     @GetMapping("/statistics/{studentId}")
-    public Result<KnowledgePointStatisticsCardsDTO> getStatisticsCards(@PathVariable Long studentId) {
-        KnowledgePointStatisticsCardsDTO cards = analysisService.getStatisticsCards(studentId);
+    public Result<KnowledgePointStatisticsCardsDTO> getStatisticsCards(@PathVariable Long studentId, @RequestParam(required = false) Long courseId) {
+        KnowledgePointStatisticsCardsDTO cards = analysisService.getStatisticsCards(studentId, courseId);
         return Result.success(cards);
     }
 
