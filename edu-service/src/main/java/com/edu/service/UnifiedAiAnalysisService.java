@@ -1,7 +1,6 @@
 package com.edu.service;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.edu.domain.*;
 import com.edu.domain.dto.AiSuggestionDTO;
 import com.edu.repository.*;

@@ -8,9 +8,11 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -231,6 +233,7 @@ public class ExamGradeImportValidator {
             }
         }
           // 3. 更新考试统计数据
+        recalculateExamCourseRankingAndTrend(exam);
         updateExamStatistics(exam);
 
         // 4. 处理知识点掌握度并触发AI分析
@@ -283,8 +286,8 @@ public class ExamGradeImportValidator {
                 ensureEnrollment(student, exam.getCourse());
                 
                 for (KnowledgePoint kp : kps) {
-                    updateStudentMastery(student, kp, scoreRate);
                     saveKnowledgePointScoreDetail(student, kp, "EXAM", exam.getId(), scoreRate);
+                    updateStudentMastery(student, kp, scoreRate);
                 }
             }
             
@@ -324,23 +327,11 @@ public class ExamGradeImportValidator {
         ExamGrade grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), student.getId())
             .orElse(null);
 
-        boolean isNew = (grade == null);
-        if (isNew) {
+        if (grade == null) {
             grade = new ExamGrade();
             grade.setExam(exam);
             grade.setStudent(student);
             grade.setCreatedAt(LocalDateTime.now());
-            
-            Double previousScore = getPreviousExamScore(student, exam);
-            if (previousScore != null) {
-                String trend = calculateScoreTrend(score, previousScore);
-                grade.setScoreTrend(trend);
-            } else {
-                grade.setScoreTrend("STABLE");
-            }
-        } else {
-            String trend = calculateScoreTrend(score, (double) grade.getScore());
-            grade.setScoreTrend(trend);
         }
 
         grade.setScore(score.intValue());
@@ -356,10 +347,39 @@ public class ExamGradeImportValidator {
 
         return saved;
     }
+
+    /**
+     * 基于当前考试对应课程的已选课学生成绩，统一重算排名和进退步趋势
+     */
+    private void recalculateExamCourseRankingAndTrend(Exam exam) {
+        List<ExamGrade> allGrades = examGradeRepository.findByExam(exam).stream()
+            .filter(g -> g.getScore() != null)
+            .filter(g -> !enrollmentRepository.findByStudentAndCourse(g.getStudent(), exam.getCourse()).isEmpty())
+            .sorted(Comparator.comparing(ExamGrade::getScore).reversed())
+            .collect(java.util.stream.Collectors.toList());
+
+        for (int i = 0; i < allGrades.size(); i++) {
+            ExamGrade grade = allGrades.get(i);
+            int currentRank = i + 1;
+            grade.setClassRank(currentRank);
+
+            Integer previousRank = getPreviousExamRank(grade.getStudent(), exam);
+            if (previousRank == null) {
+                grade.setScoreTrend("STABLE");
+            } else if (currentRank < previousRank) {
+                grade.setScoreTrend("UP");
+            } else if (currentRank > previousRank) {
+                grade.setScoreTrend("DOWN");
+            } else {
+                grade.setScoreTrend("STABLE");
+            }
+        }
+        examGradeRepository.saveAll(allGrades);
+    }
        /**
      * 获取学生上次同类型考试的成绩
      */
-    private Double getPreviousExamScore(Student student, Exam currentExam) {
+    private Integer getPreviousExamRank(Student student, Exam currentExam) {
         // 查找同课程、同类型且考试日期在当前之前的考试
         List<Exam> previousExams = examRepository.findByCourseAndExamDateBefore(
             currentExam.getCourse(), 
@@ -375,20 +395,8 @@ public class ExamGradeImportValidator {
         Optional<ExamGrade> previousGrade = examGradeRepository
             .findByExamIdAndStudentId(previousExam.getId(), student.getId());
         
-        return previousGrade.map(ExamGrade::getScore).map(Double::valueOf).orElse(null);
+        return previousGrade.map(ExamGrade::getClassRank).orElse(null);
     }
-
-        /**
-         * 计算成绩趋势
-         */
-        private String calculateScoreTrend(Double currentScore, Double previousScore) {
-            if (previousScore == null) return "STABLE";
-            
-            double diff = currentScore - previousScore;
-            if (diff >= 5) return "UP";
-            if (diff <= -5) return "DOWN";
-            return "STABLE";
-        }
 
        /**
      * 确保学生已选课（自动创建 Enrollment）
@@ -447,7 +455,10 @@ public class ExamGradeImportValidator {
      * 更新考试统计数据
      */
     private void updateExamStatistics(Exam exam) {
-        List<ExamGrade> grades = examGradeRepository.findByExam(exam);
+        List<ExamGrade> grades = examGradeRepository.findByExam(exam).stream()
+            .filter(g -> g.getScore() != null)
+            .filter(g -> !enrollmentRepository.findByStudentAndCourse(g.getStudent(), exam.getCourse()).isEmpty())
+            .collect(java.util.stream.Collectors.toList());
         if (grades.isEmpty()) return;
 
         double avg = grades.stream()
@@ -480,15 +491,24 @@ public class ExamGradeImportValidator {
         StudentKnowledgeMastery mastery;
         if (existing.isPresent()) {
             mastery = existing.get();
-            // 加权平均：旧值70% + 新值30%
-            double newLevel = mastery.getMasteryLevel() * 0.7 + newScoreRate * 0.3;
-            mastery.setMasteryLevel(Math.min(newLevel, 100));
         } else {
             mastery = new StudentKnowledgeMastery();
             mastery.setStudent(student);
             mastery.setKnowledgePoint(kp);
-            mastery.setMasteryLevel(newScoreRate);
         }
+
+        List<KnowledgePointScoreDetail> allDetails = kpScoreDetailRepository.findByStudentAndKnowledgePoint(student, kp);
+        double avgActualScore = allDetails.stream()
+            .filter(Objects::nonNull)
+            .map(KnowledgePointScoreDetail::getActualScore)
+            .filter(Objects::nonNull)
+            .mapToDouble(BigDecimal::doubleValue)
+            .average()
+            .orElse(newScoreRate);
+
+        double normalized = Math.min(Math.max(avgActualScore, 0D), 100D);
+        mastery.setMasteryLevel(normalized);
+        mastery.setScore(normalized);
         mastery.setUpdatedAt(LocalDateTime.now());
         
         // 设置薄弱程度
@@ -506,15 +526,23 @@ public class ExamGradeImportValidator {
      */
     private void saveKnowledgePointScoreDetail(Student student, KnowledgePoint kp, 
             String sourceType, Long sourceId, double scoreRate) {
-        KnowledgePointScoreDetail detail = new KnowledgePointScoreDetail();
-        detail.setStudent(student);
-        detail.setKnowledgePoint(kp);
-        detail.setSourceType(sourceType);
-        detail.setSourceId(sourceId);
-        detail.setScoreRate(BigDecimal.valueOf(scoreRate).setScale(2, RoundingMode.HALF_UP));
-        detail.setMaxScore(BigDecimal.valueOf(100));
-        detail.setActualScore(BigDecimal.valueOf(scoreRate).setScale(2, RoundingMode.HALF_UP));
-        detail.setCreatedAt(LocalDateTime.now());
+        KnowledgePointScoreDetail detail = kpScoreDetailRepository
+            .findFirstByStudentAndKnowledgePointAndSourceTypeAndSourceIdOrderByCreatedAtDesc(
+                student, kp, sourceType, sourceId)
+            .orElseGet(() -> {
+                KnowledgePointScoreDetail created = new KnowledgePointScoreDetail();
+                created.setStudent(student);
+                created.setKnowledgePoint(kp);
+                created.setSourceType(sourceType);
+                created.setSourceId(sourceId);
+                created.setCreatedAt(LocalDateTime.now());
+                return created;
+            });
+
+        BigDecimal normalized = BigDecimal.valueOf(scoreRate).setScale(2, RoundingMode.HALF_UP);
+        detail.setScoreRate(normalized);
+        detail.setMaxScore(BigDecimal.valueOf(100).setScale(2, RoundingMode.HALF_UP));
+        detail.setActualScore(normalized);
         
         kpScoreDetailRepository.save(detail);
     }

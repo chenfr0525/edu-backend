@@ -86,7 +86,17 @@ public class AiAnalysisReportService {
      */
     @Transactional
     public void deleteOldReports(String targetType, Long targetId, String reportType) {
-        reportRepository.deleteByTargetTypeAndTargetIdAndReportType(targetType, targetId, reportType);
+         List<AiAnalysisReport> existingReports = reportRepository
+            .findByTargetTypeAndTargetIdAndReportType(targetType, targetId, reportType);
+        
+        if (existingReports != null && !existingReports.isEmpty()) {
+            log.info("删除旧报告: targetType={}, targetId={}, reportType={}, count={}", 
+                targetType, targetId, reportType, existingReports.size());
+            reportRepository.deleteAll(existingReports);
+        } else {
+            log.debug("没有找到需要删除的旧报告: targetType={}, targetId={}, reportType={}", 
+                targetType, targetId, reportType);
+    }
     }
 
 

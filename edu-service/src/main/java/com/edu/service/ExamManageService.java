@@ -46,6 +46,8 @@ public class ExamManageService {
     private final KnowledgePointRepository knowledgePointRepository;
     private final KnowledgePointScoreDetailRepository kpScoreDetailRepository;
     private final StudentKnowledgeMasteryRepository masteryRepository;
+    private final EnrollmentRepository enrollmentRepository;
+    private final ActivitySyncService activitySyncService;
     private final AiAnalysisReportRepository aiReportRepository;
     private final UnifiedAiAnalysisService unifiedAiAnalysisService;
     private final ObjectMapper objectMapper;
@@ -757,25 +759,12 @@ if (!scores.isEmpty()) {
             }
         }
         
-        // 更新考试统计数据
+        // 基于当前选修课程统一重算排名与趋势，再更新统计
+        recalculateExamCourseRankingAndTrend(exam);
         updateExamStatistics(exam);
         
-       // 调用统一AI服务生成分析报告
-        boolean aiCompleted = false;
-        try {
-            // 使用统一AI服务生成考试分析报告
-            unifiedAiAnalysisService.getOrCreateAnalysis(
-                "EXAM",
-                exam.getId(),
-                "EXAM_ANALYSIS",
-                true  // 强制刷新，因为刚导入新数据
-            );
-            aiCompleted = true;
-            log.info("考试AI分析完成，考试ID: {}", exam.getId());
-        } catch (Exception e) {
-            log.error("考试AI分析失败", e);
-            aiCompleted = false;
-        }
+        // 同步知识点明细、掌握度，并触发AI分析
+        boolean aiCompleted = processExamGradesAndUpdateMastery(exam, savedGrades);
         
         tempFileStore.remove(request.getFileId());
         
@@ -789,6 +778,8 @@ if (!scores.isEmpty()) {
     private ExamGrade importExamGrade(Exam exam, ExamImportRowVO row) {
         Student student = studentRepository.findByStudentNo(row.getStudentNo())
             .orElseThrow(() -> new RuntimeException("学生不存在: " + row.getStudentNo()));
+
+        ensureEnrollment(student, exam.getCourse());
         
         Optional<ExamGrade> existing = examGradeRepository.findByExamIdAndStudentId(exam.getId(), student.getId());
         ExamGrade grade;
@@ -804,23 +795,46 @@ if (!scores.isEmpty()) {
             grade.setRemark(row.getRemark());
             grade.setCreatedAt(LocalDateTime.now());
         }
-        
-        // 计算班级排名
-        List<ExamGrade> allGrades = examGradeRepository.findByExam(exam);
-        allGrades.add(grade);
-        allGrades.sort((a, b) -> b.getScore().compareTo(a.getScore()));
-        for (int i = 0; i < allGrades.size(); i++) {
-            if (allGrades.get(i).getStudent().getId().equals(student.getId())) {
-                grade.setClassRank(i + 1);
-                break;
+        ExamGrade saved = examGradeRepository.save(grade);
+        try {
+            activitySyncService.syncExamActivity(student, exam, row.getScore());
+        } catch (Exception e) {
+            log.error("同步考试活动记录失败", e);
+        }
+        return saved;
+    }
+
+    private void recalculateExamCourseRankingAndTrend(Exam exam) {
+        List<ExamGrade> sortedCourseGrades = examGradeRepository.findByExam(exam).stream()
+            .filter(g -> g.getScore() != null)
+            .filter(g -> !enrollmentRepository.findByStudentAndCourse(g.getStudent(), exam.getCourse()).isEmpty())
+            .sorted((a, b) -> b.getScore().compareTo(a.getScore()))
+            .collect(Collectors.toList());
+
+        for (int i = 0; i < sortedCourseGrades.size(); i++) {
+            ExamGrade grade = sortedCourseGrades.get(i);
+            int currentRank = i + 1;
+            grade.setClassRank(currentRank);
+
+            Integer previousRank = getPreviousExamRank(grade.getStudent(), exam);
+            if (previousRank == null) {
+                grade.setScoreTrend("STABLE");
+            } else if (currentRank < previousRank) {
+                grade.setScoreTrend("UP");
+            } else if (currentRank > previousRank) {
+                grade.setScoreTrend("DOWN");
+            } else {
+                grade.setScoreTrend("STABLE");
             }
         }
-        
-        return examGradeRepository.save(grade);
+        examGradeRepository.saveAll(sortedCourseGrades);
     }
 
     private void updateExamStatistics(Exam exam) {
-        List<ExamGrade> grades = examGradeRepository.findByExam(exam);
+        List<ExamGrade> grades = examGradeRepository.findByExam(exam).stream()
+            .filter(g -> g.getScore() != null)
+            .filter(g -> !enrollmentRepository.findByStudentAndCourse(g.getStudent(), exam.getCourse()).isEmpty())
+            .collect(Collectors.toList());
         if (grades.isEmpty()) return;
         
         double avg = grades.stream().mapToDouble(g -> g.getScore().doubleValue()).average().orElse(0);
@@ -832,6 +846,117 @@ if (!scores.isEmpty()) {
         exam.setLowestScore(BigDecimal.valueOf(lowest));
         exam.setStatus(ExamStatus.COMPLETED);
         examRepository.save(exam);
+    }
+
+    private Integer getPreviousExamRank(Student student, Exam currentExam) {
+        List<Exam> previousExams = examRepository.findByCourseAndExamDateBefore(
+            currentExam.getCourse(),
+            currentExam.getExamDate()
+        );
+        if (previousExams.isEmpty()) {
+            return null;
+        }
+        Exam previousExam = previousExams.get(0);
+        return examGradeRepository.findByExamIdAndStudentId(previousExam.getId(), student.getId())
+            .map(ExamGrade::getClassRank)
+            .orElse(null);
+    }
+
+    private boolean processExamGradesAndUpdateMastery(Exam exam, List<ExamGrade> grades) {
+        try {
+            List<Long> knowledgePointIds = exam.getKnowledgePointIds();
+            if (knowledgePointIds == null || knowledgePointIds.isEmpty()) {
+                log.warn("考试 {} 未关联知识点，跳过知识点掌握度更新", exam.getId());
+            } else {
+                List<KnowledgePoint> kps = knowledgePointRepository.findAllById(knowledgePointIds);
+                for (ExamGrade grade : grades) {
+                    Student student = grade.getStudent();
+                    double scoreRate = (grade.getScore() != null && exam.getFullScore() != null && exam.getFullScore() > 0)
+                        ? grade.getScore().doubleValue() / exam.getFullScore() * 100
+                        : 0D;
+                    for (KnowledgePoint kp : kps) {
+                        saveKnowledgePointScoreDetail(student, kp, "EXAM", exam.getId(), scoreRate);
+                        updateStudentMastery(student, kp, scoreRate);
+                    }
+                }
+            }
+
+            unifiedAiAnalysisService.getOrCreateAnalysis(
+                "EXAM",
+                exam.getId(),
+                "EXAM_ANALYSIS",
+                true
+            );
+            log.info("考试AI分析完成，考试ID: {}", exam.getId());
+            return true;
+        } catch (Exception e) {
+            log.error("处理考试知识点掌握度或AI分析失败，考试ID: {}", exam.getId(), e);
+            return false;
+        }
+    }
+
+    private void updateStudentMastery(Student student, KnowledgePoint kp, double fallbackScoreRate) {
+        StudentKnowledgeMastery mastery = masteryRepository.findByStudentAndKnowledgePoint(student, kp)
+            .orElseGet(() -> {
+                StudentKnowledgeMastery created = new StudentKnowledgeMastery();
+                created.setStudent(student);
+                created.setKnowledgePoint(kp);
+                return created;
+            });
+
+        List<KnowledgePointScoreDetail> allDetails = kpScoreDetailRepository.findByStudentAndKnowledgePoint(student, kp);
+        double avgActualScore = allDetails.stream()
+            .map(KnowledgePointScoreDetail::getActualScore)
+            .filter(Objects::nonNull)
+            .mapToDouble(BigDecimal::doubleValue)
+            .average()
+            .orElse(fallbackScoreRate);
+
+        double normalized = Math.min(Math.max(avgActualScore, 0D), 100D);
+        mastery.setMasteryLevel(normalized);
+        mastery.setScore(normalized);
+        mastery.setUpdatedAt(LocalDateTime.now());
+
+        if (normalized < 50) mastery.setWeaknessLevel("SEVERE");
+        else if (normalized < 60) mastery.setWeaknessLevel("MODERATE");
+        else if (normalized < 70) mastery.setWeaknessLevel("MILD");
+        else mastery.setWeaknessLevel("GOOD");
+
+        masteryRepository.save(mastery);
+    }
+
+    private void saveKnowledgePointScoreDetail(
+        Student student, KnowledgePoint kp, String sourceType, Long sourceId, double scoreRate) {
+        KnowledgePointScoreDetail detail = kpScoreDetailRepository
+            .findFirstByStudentAndKnowledgePointAndSourceTypeAndSourceIdOrderByCreatedAtDesc(
+                student, kp, sourceType, sourceId)
+            .orElseGet(() -> {
+                KnowledgePointScoreDetail created = new KnowledgePointScoreDetail();
+                created.setStudent(student);
+                created.setKnowledgePoint(kp);
+                created.setSourceType(sourceType);
+                created.setSourceId(sourceId);
+                created.setCreatedAt(LocalDateTime.now());
+                return created;
+            });
+
+        BigDecimal normalized = BigDecimal.valueOf(scoreRate).setScale(2, RoundingMode.HALF_UP);
+        detail.setScoreRate(normalized);
+        detail.setMaxScore(BigDecimal.valueOf(100).setScale(2, RoundingMode.HALF_UP));
+        detail.setActualScore(normalized);
+        kpScoreDetailRepository.save(detail);
+    }
+
+    private void ensureEnrollment(Student student, Course course) {
+        if (enrollmentRepository.findByStudentAndCourse(student, course).isEmpty()) {
+            Enrollment enrollment = new Enrollment();
+            enrollment.setStudent(student);
+            enrollment.setCourse(course);
+            enrollment.setStatus(CourseStatus.ONGOING);
+            enrollment.setProgress(0);
+            enrollment.setEnrolledAt(LocalDateTime.now());
+            enrollmentRepository.save(enrollment);
+        }
     }
 
     private int getTotalStudentsByClassId(Long classId) {

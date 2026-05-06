@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface KnowledgePointScoreDetailRepository extends JpaRepository<KnowledgePointScoreDetail, Long> {
@@ -22,6 +23,12 @@ public interface KnowledgePointScoreDetailRepository extends JpaRepository<Knowl
     void deleteByStudentId(Long studentId);
     // 查询某学生某知识点的所有得分记录
     List<KnowledgePointScoreDetail> findByStudentAndKnowledgePoint(Student student, KnowledgePoint knowledgePoint);
+
+    /**
+     * 查找同一来源下的唯一知识点得分明细（用于更新而不是重复新增）
+     */
+    Optional<KnowledgePointScoreDetail> findFirstByStudentAndKnowledgePointAndSourceTypeAndSourceIdOrderByCreatedAtDesc(
+        Student student, KnowledgePoint knowledgePoint, String sourceType, Long sourceId);
     
     // 查询某学生最近一次某知识点的得分率
     KnowledgePointScoreDetail findFirstByStudentAndKnowledgePointOrderByCreatedAtDesc(

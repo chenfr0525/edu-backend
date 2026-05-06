@@ -10,7 +10,6 @@ com\edu\service\ClassWrongQuestionStatsService.class
 com\edu\service\HomeworkAnalysisService.class
 com\edu\service\CourseService.class
 com\edu\service\TeacherService.class
-com\edu\service\DeepSeekService$AnalysisResponse.class
 com\edu\service\KnowledgePointScoreDetailService.class
 com\edu\service\ScorePredictionService.class
 com\edu\service\SemesterService.class

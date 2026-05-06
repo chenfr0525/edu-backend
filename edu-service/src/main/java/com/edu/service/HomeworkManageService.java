@@ -1132,8 +1132,8 @@ public List<FieldMapping> getHomeworkGradeImportFieldMappings() {
                     : (submissionScore != null ? submissionScore : 0);
                 
                 for (KnowledgePoint kp : kps) {
-                    updateStudentMastery(student, kp, scoreRate);
                     saveKnowledgePointScoreDetail(student, kp, "HOMEWORK", homework.getId(), scoreRate);
+                    updateStudentMastery(student, kp, scoreRate);
                 }
             }
             // 2. 使用统一服务生成AI分析报告（自动保存）
@@ -1161,15 +1161,25 @@ private void updateStudentMastery(Student student, KnowledgePoint kp, double new
     StudentKnowledgeMastery mastery;
     if (existing.isPresent()) {
         mastery = existing.get();
-        // 加权平均：旧值70% + 新值30%
-        double newLevel = mastery.getMasteryLevel() * 0.7 + newScoreRate * 0.3;
-        mastery.setMasteryLevel(Math.min(newLevel, 100));
     } else {
         mastery = new StudentKnowledgeMastery();
         mastery.setStudent(student);
         mastery.setKnowledgePoint(kp);
-        mastery.setMasteryLevel(newScoreRate);
     }
+
+    // 按 student + knowledgePoint 的 actual_score 均值重算掌握度，保持兼容字段 score/masteryLevel 一致
+    List<KnowledgePointScoreDetail> allDetails = kpScoreDetailRepository.findByStudentAndKnowledgePoint(student, kp);
+    double avgActualScore = allDetails.stream()
+        .filter(Objects::nonNull)
+        .map(KnowledgePointScoreDetail::getActualScore)
+        .filter(Objects::nonNull)
+        .mapToDouble(BigDecimal::doubleValue)
+        .average()
+        .orElse(newScoreRate);
+
+    double normalized = Math.min(Math.max(avgActualScore, 0D), 100D);
+    mastery.setMasteryLevel(normalized);
+    mastery.setScore(normalized);
     mastery.setUpdatedAt(LocalDateTime.now());
     
     // 设置薄弱程度
@@ -1184,17 +1194,25 @@ private void updateStudentMastery(Student student, KnowledgePoint kp, double new
 
 private void saveKnowledgePointScoreDetail(Student student, KnowledgePoint kp, 
         String sourceType, Long sourceId, double scoreRate) {
-    KnowledgePointScoreDetail detail = new KnowledgePointScoreDetail();
-    detail.setStudent(student);
-    detail.setKnowledgePoint(kp);
-    detail.setSourceType(sourceType);
-    detail.setSourceId(sourceId);
-    detail.setScoreRate(BigDecimal.valueOf(scoreRate));
-    // 满分100分，实际得分 = 得分率
-    detail.setMaxScore(BigDecimal.valueOf(100));
-    detail.setActualScore(BigDecimal.valueOf(scoreRate));
-    detail.setCreatedAt(LocalDateTime.now());
-    
+    KnowledgePointScoreDetail detail = kpScoreDetailRepository
+        .findFirstByStudentAndKnowledgePointAndSourceTypeAndSourceIdOrderByCreatedAtDesc(
+            student, kp, sourceType, sourceId)
+        .orElseGet(() -> {
+            KnowledgePointScoreDetail created = new KnowledgePointScoreDetail();
+            created.setStudent(student);
+            created.setKnowledgePoint(kp);
+            created.setSourceType(sourceType);
+            created.setSourceId(sourceId);
+            created.setCreatedAt(LocalDateTime.now());
+            return created;
+        });
+
+    BigDecimal normalized = BigDecimal.valueOf(scoreRate).setScale(2, RoundingMode.HALF_UP);
+    detail.setScoreRate(normalized);
+    // 兼容既有展示：使用百分制保存
+    detail.setMaxScore(BigDecimal.valueOf(100).setScale(2, RoundingMode.HALF_UP));
+    detail.setActualScore(normalized);
+
     kpScoreDetailRepository.save(detail);
 }
     private void ensureEnrollment(Student student, Course course) {
