@@ -310,31 +310,48 @@ public class StudentExamAnalysisService {
     
     // ==================== 原有的私有辅助方法（修复错误） ====================
     
-    private StudentExamDTO convertToStudentExamDTO(Exam exam, Long studentId) {
-        Optional<ExamGrade> grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), studentId);
-        
-        if (!grade.isPresent()) {
-            return null;
-        } 
-        
-        StudentExamDTO dto = new StudentExamDTO();
-        dto.setId(exam.getId());
-        dto.setName(exam.getName());
-        dto.setType(exam.getType().toString());
+  private StudentExamDTO convertToStudentExamDTO(Exam exam, Long studentId) {
+    if (exam == null) {
+        log.warn("exam is null");
+        return null;
+    }
+    
+    Optional<ExamGrade> grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), studentId);
+    
+    StudentExamDTO dto = new StudentExamDTO();
+    dto.setId(exam.getId());
+    dto.setName(exam.getName());
+    dto.setType(exam.getType().toString());
+    
+    // 处理 course 可能为 null 的情况
+    if (exam.getCourse() != null) {
         dto.setCourseName(exam.getCourse().getName());
         dto.setCourseId(exam.getCourse().getId());
-        dto.setExamDate(exam.getExamDate());
-        dto.setFullScore(exam.getFullScore());
-        dto.setStatus(exam.getStatus().toString());
-        
+    }
+    
+    dto.setExamDate(exam.getExamDate());
+    dto.setFullScore(exam.getFullScore());
+    dto.setStatus(exam.getStatus().toString());
+    
+    // 如果有成绩，设置成绩相关信息
+    if (grade.isPresent()) {
         ExamGrade g = grade.get();
         dto.setMyScore(g.getScore());
-        dto.setClassAvgScore(exam.getClassAvgScore());
         dto.setClassRank(g.getClassRank());
         dto.setScoreTrend(g.getScoreTrend());
-        
-        return dto;
+    } else {
+        // 没有成绩时设置默认值
+        dto.setMyScore(null);
+        dto.setClassRank(null);
+        dto.setScoreTrend(null);
+        log.debug("学生 {} 在考试 {} 中没有成绩记录", studentId, exam.getId());
     }
+    
+    // 班级平均分可能为 null
+    dto.setClassAvgScore(exam.getClassAvgScore());
+    
+    return dto;
+}
     
     private MyExamGradeInfoDTO getMyExamGradeInfo(Long studentId, Exam exam) {
         Optional<ExamGrade> grade = examGradeRepository.findByExamIdAndStudentId(exam.getId(), studentId);

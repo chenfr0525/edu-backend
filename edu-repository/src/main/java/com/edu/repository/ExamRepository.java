@@ -61,7 +61,6 @@ public interface ExamRepository extends JpaRepository<Exam, Long> {
            "  SELECT s.classInfo.id FROM Student s WHERE s.id = :studentId" +
            ") " +
            "AND e.course.id = :courseId " +
-           "AND e.status = 'COMPLETED' " +
            "ORDER BY e.examDate DESC")
     List<Exam> findByStudentIdAndCourseId(@Param("studentId") Long studentId, 
                                            @Param("courseId") Long courseId);
