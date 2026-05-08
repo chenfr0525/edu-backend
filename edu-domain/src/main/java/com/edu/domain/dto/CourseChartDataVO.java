@@ -9,15 +9,16 @@ import java.util.List;
 @Data
 @Builder
 public class CourseChartDataVO {
-   // 成绩趋势图
-    private List<ScoreTrendItem> scoreTrend;
-    
+   // 成绩趋势图（考试趋势与作业趋势分开）
+    private List<ScoreTrendItem> examTrend;
+    private List<ScoreTrendItem> homeworkTrend;
+
     // 知识点掌握度雷达图
     private RadarChartData radarChart;
-    
+
     // 成绩分布饼图
     private ScoreDistributionPie scoreDistribution;
-    
+
     // 作业/考试对比柱状图
     private List<ComparisonItem> homeworkExamComparison;
 

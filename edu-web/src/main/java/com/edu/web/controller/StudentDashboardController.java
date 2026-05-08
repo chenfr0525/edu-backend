@@ -57,14 +57,16 @@ public class StudentDashboardController {
         }
         dashboard.put("scoreTrend", trendData);
         
-        // 3. 平均分和最新排名
+        // 3. 平均分
         Double avgScore = examGradeService.getStudentAverageScore(studentId);
         dashboard.put("avgScore", avgScore != null ? avgScore : 0);
         
-        Integer latestRank = examGradeService.getLatestRank(studentId);
-        dashboard.put("latestRank", latestRank != null ? latestRank : 0);
+        // 4. 活跃分数班级排名：按总活跃分数在学生所在班级内排第几名
+        int[] rankInfo = calculateActivityRankInClass(student);
+        dashboard.put("latestRank", rankInfo[0]);       // 排名
+        dashboard.put("classStudentCount", rankInfo[1]); // 班级总人数
         
-        // 4. 成绩趋势（进步/退步/稳定）
+        // 5. 成绩趋势（进步/退步/稳定）
         String trend = examGradeService.getLatestTrend(studentId);
         dashboard.put("trend", trend != null ? trend : "STABLE");
         
@@ -190,6 +192,41 @@ public class StudentDashboardController {
         return heatmapData;
     }
     
+    /**
+     * 计算活跃分数在同班中的排名
+     * @return int[] { rank, classSize }
+     */
+    private int[] calculateActivityRankInClass(Student student) {
+        if (student == null || student.getClassInfo() == null) {
+            return new int[]{0, 0};
+        }
+        
+        List<Student> classmates = studentService.findByClassInfo(student.getClassInfo());
+        if (classmates.isEmpty()) {
+            return new int[]{0, 0};
+        }
+        
+        // 获取全班每位学生的总活跃分数
+        List<Map.Entry<Long, Double>> sorted = classmates.stream()
+            .map(c -> {
+                Double score = activityRecordService.getStudentTotalActivityScore(c.getId());
+                return new AbstractMap.SimpleEntry<>(c.getId(), score != null ? score : 0.0);
+            })
+            .sorted(Map.Entry.<Long, Double>comparingByValue().reversed())
+            .collect(Collectors.toList());
+        
+        // 找当前学生位置
+        int rank = 1;
+        for (Map.Entry<Long, Double> entry : sorted) {
+            if (entry.getKey().equals(student.getId())) {
+                return new int[]{rank, classmates.size()};
+            }
+            rank++;
+        }
+        
+        return new int[]{classmates.size(), classmates.size()}; // 排最后
+    }
+
     /**
      * 获取知识点雷达图专用数据
      */

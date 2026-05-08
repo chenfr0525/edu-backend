@@ -229,7 +229,6 @@ public class ExamGradeImportValidator {
                     i + 1, row.get("studentName"), e.getMessage());
                 log.error(errorMsg);
                 resultMsg.append(errorMsg).append("\n");
-                throw new RuntimeException("成绩导入失败，已回滚所有数据：" + errorMsg);
             }
         }
           // 3. 更新考试统计数据

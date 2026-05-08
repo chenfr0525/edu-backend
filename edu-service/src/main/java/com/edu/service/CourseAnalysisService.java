@@ -131,15 +131,22 @@ public class CourseAnalysisService {
     }
 
     private Double calculateCoursePassRate(Long courseId) {
-        List<ExamGrade> grades = examGradeRepository.findByCourseId(courseId);
-        if (grades.isEmpty()) return 0.0;
-        
-        // 获取该课程的所有考试，取及格分（简化：默认60分及格）
-        long passCount = grades.stream()
-            .filter(g -> g.getScore() != null && g.getScore() >= 60)
-            .count();
-        
-        return passCount * 100.0 / grades.size();
+        List<Exam> exams = examRepository.findByCourseId(courseId);
+        if (exams.isEmpty()) return 0.0;
+
+        long totalCount = 0;
+        long passCount = 0;
+        for (Exam exam : exams) {
+            Integer passScore = exam.getPassScore() != null ? exam.getPassScore() : 60;
+            List<ExamGrade> grades = examGradeRepository.findByExam(exam);
+            for (ExamGrade g : grades) {
+                if (g.getScore() != null) {
+                    totalCount++;
+                    if (g.getScore() >= passScore) passCount++;
+                }
+            }
+        }
+        return totalCount > 0 ? passCount * 100.0 / totalCount : 0.0;
     }
 
     // ==================== 3. 课程详情 ====================
@@ -264,26 +271,16 @@ public class CourseAnalysisService {
     }
 
     private KnowledgePointVO convertToKnowledgePointVO(KnowledgePoint kp, Long courseId) {
-    // 从 knowledge_point_score_detail 表获取班级平均掌握度
-    // 需要班级ID，这里如果无法获取则返回0
-    Double avgMastery = 0.0;
-    
-    // 尝试获取该课程下所有学生的班级（简化：取第一个班级）
-    List<Student> students = studentRepository.findByEnrollmentsCourse(courseId != null ? 
-        courseRepository.findById(courseId).orElse(null) : null);
-    if (students != null && !students.isEmpty() && students.get(0).getClassInfo() != null) {
-        Long classId = students.get(0).getClassInfo().getId();
-        BigDecimal classAvg = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-        if (classAvg != null) {
-            avgMastery = classAvg.doubleValue();
-        }
-    }
-         // 统计子知识点数量
+    // 从 knowledge_point_score_detail 表获取按课程选修学生平均掌握度
+    BigDecimal avg = kpScoreDetailRepository.getCourseEnrollmentAvgScoreRate(kp.getId(), courseId);
+    double avgMastery = avg != null ? avg.doubleValue() : 0.0;
+
+    // 统计子知识点数量
     int childCount = knowledgePointRepository.findByParentId(kp.getId()).size();
-    
+
     // 判断薄弱程度
     String weaknessLevel = getWeaknessLevel(avgMastery);
-    
+
     return KnowledgePointVO.builder()
         .id(kp.getId())
         .name(kp.getName())
@@ -615,14 +612,15 @@ public class CourseAnalysisService {
             .totalStudents(0)
             .build();
     }
-        
-       Long classId = students.get(0).getClassInfo() != null ? students.get(0).getClassInfo().getId() : null;
+
+    // 按课程选修学生计算平均掌握度
+    Long courseId = kp.getCourse() != null ? kp.getCourse().getId() : null;
     BigDecimal classAvgMastery = BigDecimal.ZERO;
-    if (classId != null) {
-        classAvgMastery = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-        if (classAvgMastery == null) classAvgMastery = BigDecimal.ZERO;
+    if (courseId != null) {
+        BigDecimal avg = kpScoreDetailRepository.getCourseEnrollmentAvgScoreRate(kp.getId(), courseId);
+        if (avg != null) classAvgMastery = avg;
     }
-    
+
     // 获取学生的掌握度列表
     List<Double> masteries = new ArrayList<>();
     int masteredCount = 0;
@@ -640,7 +638,7 @@ public class CourseAnalysisService {
 
     double highest = masteries.stream().mapToDouble(Double::doubleValue).max().orElse(0);
     double lowest = masteries.stream().mapToDouble(Double::doubleValue).min().orElse(0);
-    
+
     return KnowledgePointStatsVO.builder()
         .classAvgMastery(classAvgMastery)
         .highestMastery(BigDecimal.valueOf(highest).setScale(2, RoundingMode.HALF_UP))
@@ -741,19 +739,18 @@ public class CourseAnalysisService {
         List<Student> students = studentRepository.findByEnrollmentsCourse(course);
         
         return CourseChartDataVO.builder()
-            .scoreTrend(getScoreTrend(course))
+            .examTrend(getExamTrend(course))
+            .homeworkTrend(getHomeworkTrend(course))
             .radarChart(getRadarChartData(course, students))
             .scoreDistribution(getScoreDistributionPie(course))
             .homeworkExamComparison(getHomeworkExamComparison(course))
             .build();
     }
 
-    private List<ScoreTrendItem> getScoreTrend(Course course) {
+    private List<ScoreTrendItem> getExamTrend(Course course) {
         List<ScoreTrendItem> trend = new ArrayList<>();
-        
-        // 获取该课程的所有考试（按日期排序）
+
         List<Exam> exams = examRepository.findByCourseId(course.getId());
-        
         for (Exam exam : exams) {
             Double avgScore = exam.getClassAvgScore() != null ? exam.getClassAvgScore().doubleValue() : 0;
             trend.add(ScoreTrendItem.builder()
@@ -763,8 +760,14 @@ public class CourseAnalysisService {
                 .date(exam.getExamDate().toLocalDate().toString())
                 .build());
         }
-        
-        // 获取作业数据
+
+        trend.sort((a, b) -> a.getDate().compareTo(b.getDate()));
+        return trend;
+    }
+
+    private List<ScoreTrendItem> getHomeworkTrend(Course course) {
+        List<ScoreTrendItem> trend = new ArrayList<>();
+
         List<Homework> homeworks = homeworkRepository.findByCourse(course);
         for (Homework homework : homeworks) {
             Double avgScore = homework.getAvgScore() != null ? homework.getAvgScore().doubleValue() : 0;
@@ -772,39 +775,31 @@ public class CourseAnalysisService {
                 .name(homework.getName())
                 .score(BigDecimal.valueOf(avgScore).setScale(2, RoundingMode.HALF_UP))
                 .type("作业")
-                .date(homework.getDeadline().toLocalDate().toString())
+                .date(homework.getDeadline() != null ? homework.getDeadline().toLocalDate().toString() : "")
                 .build());
         }
-        
-        // 按日期排序
+
         trend.sort((a, b) -> a.getDate().compareTo(b.getDate()));
-        
         return trend;
     }
 
     private RadarChartData getRadarChartData(Course course, List<Student> students) {
     List<KnowledgePoint> kps = knowledgePointRepository.findByCourseOrderBySortOrderAsc(course);
-    
+
     List<String> indicators = new ArrayList<>();
     List<BigDecimal> classAvgValues = new ArrayList<>();
-    
-    // 获取班级ID（从第一个学生获取）
-    Long classId = null;
-    if (students != null && !students.isEmpty() && students.get(0).getClassInfo() != null) {
-        classId = students.get(0).getClassInfo().getId();
-    }
+
+    Long courseId = course.getId();
     for (KnowledgePoint kp : kps) {
         indicators.add(kp.getName());
-        
-        // 从 knowledge_point_score_detail 表获取班级平均掌握度
+
+        // 从 knowledge_point_score_detail 表获取按课程选修学生平均掌握度
         BigDecimal avgMastery = BigDecimal.ZERO;
-        if (classId != null) {
-            avgMastery = kpScoreDetailRepository.getClassAvgScoreRate(kp.getId(), classId);
-            if (avgMastery == null) avgMastery = BigDecimal.ZERO;
-        }
+        BigDecimal avg = kpScoreDetailRepository.getCourseEnrollmentAvgScoreRate(kp.getId(), courseId);
+        if (avg != null) avgMastery = avg;
         classAvgValues.add(avgMastery);
     }
-    
+
     return RadarChartData.builder()
         .indicators(indicators)
         .classAvg(classAvgValues)

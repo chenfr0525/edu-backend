@@ -78,6 +78,7 @@ public class ExamImportValidator {
         int successCount = 0;
         int failCount = 0;
         List<String> errorDetails = new ArrayList<>();
+        List<String> duplicateDetails = new ArrayList<>(); // 记录重复数据
 
         for (int i = 0; i < data.size(); i++) {
             Map<String, Object> row = data.get(i);
@@ -87,17 +88,31 @@ public class ExamImportValidator {
                 log.info("成功导入考试：{}", row.get("name"));
             } catch (Exception e) {
                 failCount++;
-                String errorMsg = String.format("第%d行 - 考试名称：%s，原因：%s",
-                    i + 1, row.get("name"), e.getMessage());
-                log.error(errorMsg);
-                errorDetails.add(errorMsg);
-                throw new RuntimeException("导入失败，已回滚所有数据：" + errorMsg);
+                String errorMsg = e.getMessage();
+                String rowErrorMsg = String.format("第%d行 - 考试名称：%s，原因：%s",
+                    i + 1, row.get("name"), errorMsg);
+                    if (errorMsg.contains("已存在")) {
+                    duplicateDetails.add(rowErrorMsg);
+                } else {
+                    errorDetails.add(rowErrorMsg);
+                }
+                log.error(rowErrorMsg);
             }
         }
- boolean allSuccess = failCount == 0;
-        String message = String.format("导入完成！成功：%d条，失败：%d条", successCount, failCount);
+        boolean allSuccess = failCount == 0;
+        StringBuilder messageBuilder = new StringBuilder();
+        messageBuilder.append(String.format("导入完成！成功：%d条，失败：%d条", successCount, failCount));
+        
+        if (!duplicateDetails.isEmpty()) {
+            messageBuilder.append("\n重复数据：\n").append(String.join("\n", duplicateDetails));
+        }
+        if (!errorDetails.isEmpty()) {
+            messageBuilder.append("\n其他错误：\n").append(String.join("\n", errorDetails));
+        }
+        
+        String message = messageBuilder.toString();
         if (!allSuccess) {
-            message += "，失败详情：" + String.join("\n", errorDetails);
+            log.warn(message);
         }
 
         return ImportResult.builder()

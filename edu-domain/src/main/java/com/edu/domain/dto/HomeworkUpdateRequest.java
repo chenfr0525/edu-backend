@@ -10,6 +10,7 @@ import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 import com.edu.domain.HomeworkStatus;
+import java.util.List;
 @Data
 @Builder
 @NoArgsConstructor
@@ -19,6 +20,7 @@ public class HomeworkUpdateRequest {
     
     private String description;
     private Long knowledgePointId;
+    private List<Long> knowledgePointIds;
     private Long courseId;
     private Integer questionCount;
     private Integer totalScore;

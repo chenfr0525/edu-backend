@@ -149,7 +149,7 @@ public class HomeworkManageService {
         int scoreCount = 0;
         double totalPassRate = 0;
         int passRateCount = 0;
-        double totalOnTimeRate = 0;
+        double totalSubmissionRate = 0;
         
         for (Homework hw : homeworks) {
             if (hw.getAvgScore() != null) {
@@ -161,11 +161,11 @@ public class HomeworkManageService {
                 passRateCount++;
             }
             
-            // 按时提交率
+            // 提交率 = 已批改人数 / 选修该课程总人数
             int totalStudents = (int) studentRepository.countByEnrollmentsCourse(hw.getCourse());
             if (totalStudents > 0) {
-                int onTimeCount = (int) submissionRepository.countOnTimeByHomeworkId(hw.getId());
-                totalOnTimeRate += onTimeCount * 100.0 / totalStudents;
+                int gradedCount = (int) submissionRepository.countByHomeworkIdAndStatusNot(hw.getId(), SubmissionStatus.PENDING);
+                totalSubmissionRate += gradedCount * 100.0 / totalStudents;
             }
         }
         
@@ -173,14 +173,14 @@ public class HomeworkManageService {
             BigDecimal.valueOf(totalScore / scoreCount).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
         BigDecimal avgPassRate = passRateCount > 0 ? 
             BigDecimal.valueOf(totalPassRate / passRateCount).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-        BigDecimal onTimeRate = homeworks.size() > 0 ? 
-            BigDecimal.valueOf(totalOnTimeRate / homeworks.size()).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        BigDecimal submissionRate = homeworks.size() > 0 ? 
+            BigDecimal.valueOf(totalSubmissionRate / homeworks.size()).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
         
         return HomeworkStatisticsVO.builder()
             .totalHomework(totalHomework)
             .avgScore(avgScore)
             .avgPassRate(avgPassRate)
-            .onTimeRate(onTimeRate)
+            .onTimeRate(submissionRate)
             .build();
     }
 
@@ -400,25 +400,34 @@ public Homework updateHomework(Long homeworkId, HomeworkUpdateRequest request, L
         homework.setCourse(newCourse);
     }
     
-    // 4. 如果知识点变更
-    // if (request.getKnowledgePointId() != null && 
-    //     (homework.getKnowledgePoint() == null || 
-    //      !request.getKnowledgePointId().equals(homework.getKnowledgePoint().getId()))) {
-    //     KnowledgePoint kp = knowledgePointRepository.findById(request.getKnowledgePointId())
-    //         .orElse(null);
-    //     homework.setKnowledgePoint(kp);
-    // }
-    
-    // 5. 更新基本信息
+    // 4. 更新基本信息
     homework.setName(request.getName());
     homework.setDescription(request.getDescription());
     homework.setQuestionCount(request.getQuestionCount() != null ? request.getQuestionCount() : 0);
     homework.setTotalScore(request.getTotalScore() != null ? request.getTotalScore() : 100);
     homework.setDeadline(request.getDeadline());
     
-    // 6. 更新状态
+    // 5. 更新状态
     if (request.getStatus() != null) {
         homework.setStatus(request.getStatus());
+    }
+
+    // 6. 知识点ID变更时同步刷新知识点得分明细
+    boolean kpChanged = (request.getKnowledgePointIds() != null)
+        && !request.getKnowledgePointIds().equals(homework.getKnowledgePointIds());
+    if (kpChanged) {
+        homework.setKnowledgePointIds(request.getKnowledgePointIds());
+        List<KnowledgePoint> kps = knowledgePointRepository.findAllById(request.getKnowledgePointIds());
+        List<Submission> submissions = submissionRepository.findGradedByHomeworkId(homeworkId);
+        for (Submission sub : submissions) {
+            double scoreRate = (sub.getScore() != null && homework.getTotalScore() != null && homework.getTotalScore() > 0)
+                ? sub.getScore() / homework.getTotalScore() * 100
+                : (sub.getScore() != null ? sub.getScore() : 0);
+            for (KnowledgePoint kp : kps) {
+                saveKnowledgePointScoreDetail(sub.getStudent(), kp, "HOMEWORK", homework.getId(), scoreRate);
+                updateStudentMastery(sub.getStudent(), kp, scoreRate);
+            }
+        }
     }
     
     // 7. 保存更新

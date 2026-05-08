@@ -26,6 +26,7 @@ import com.edu.domain.ExamGrade;
 import com.edu.domain.ExamStatus;
 import com.edu.domain.Homework;
 import com.edu.domain.HomeworkStatus;
+import com.edu.domain.KnowledgePoint;
 import com.edu.domain.Student;
 import com.edu.domain.StudentKnowledgeMastery;
 import com.edu.domain.Submission;
@@ -47,6 +48,7 @@ import com.edu.repository.CourseRepository;
 import com.edu.repository.ExamGradeRepository;
 import com.edu.repository.ExamRepository;
 import com.edu.repository.HomeworkRepository;
+import com.edu.repository.KnowledgePointRepository;
 import com.edu.repository.StudentKnowledgeMasteryRepository;
 import com.edu.repository.StudentRepository;
 import com.edu.repository.SubmissionRepository;
@@ -68,7 +70,8 @@ public class TeachingDashboardService {
     private final ActivityRecordRepository activityRecordRepository;
     private final SubmissionRepository submissionRepository;
     private final ActivityRecordService activityRecordService;
-    private final  UserRepository userRepository;  
+    private final UserRepository userRepository;
+    private final KnowledgePointRepository knowledgePointRepository;
 
     /**
      * 获取教师可见的班级列表
@@ -409,8 +412,9 @@ public class TeachingDashboardService {
     }
 
      private String getKnowledgePointName(Long kpId) {
-        // 简化实现，实际可从缓存获取
-        return "知识点" + kpId;
+        return knowledgePointRepository.findById(kpId)
+            .map(KnowledgePoint::getName)
+            .orElse("知识点" + kpId);
     }
     
     private static class WrongQuestionAggregate {
@@ -422,7 +426,8 @@ public class TeachingDashboardService {
     }
 
     /**
-     * 构建薄弱知识点
+     * 构建薄弱知识点：班级学生所选修课程的所有知识点得分最低的10个
+     * 展示格式：课程名称-知识点名称，显示平均得分
      */
     private List<WeakKnowledgePointDTO> buildWeakKnowledgePoints(List<Long> classIds, List<Long> courseIds) {
         List<WeakKnowledgePointDTO> result = new ArrayList<>();
@@ -441,36 +446,24 @@ public class TeachingDashboardService {
                     agg.knowledgePointId = kpId;
                     agg.knowledgePointName = mastery.getKnowledgePoint().getName();
                     agg.scores.add(mastery.getMasteryLevel());
-                    
-                   if (mastery.getMasteryLevel() < 60) {
-                        agg.weakStudents.add(WeakStudentDTO.builder()
-                            .studentId(mastery.getStudent().getId())
-                            .studentName(mastery.getStudent().getUser().getName())
-                            .studentNo(mastery.getStudent().getStudentNo())
-                            .masteryLevel(mastery.getMasteryLevel())
-                            .build());
-                    }
                 }
             }
             
-           for (WeakPointAggregate agg : aggregateMap.values()) {
+            for (WeakPointAggregate agg : aggregateMap.values()) {
                 double avgMastery = agg.scores.stream().mapToDouble(Double::doubleValue).average().orElse(100);
-                if (avgMastery < 70) {
-                    result.add(WeakKnowledgePointDTO.builder()
-                        .knowledgePointId(agg.knowledgePointId)
-                        .knowledgePointName(agg.knowledgePointName)
-                        .courseId(courseId)
-                        .courseName(course.getName())
-                        .avgMastery(Math.round(avgMastery * 100) / 100.0)
-                        .studentCount(agg.scores.size())
-                        .affectedRate(agg.scores.isEmpty() ? 0 : Math.round((agg.weakStudents.size() * 100.0 / agg.scores.size()) * 100) / 100.0)
-                        .weakStudents(agg.weakStudents.stream().limit(5).collect(Collectors.toList()))
-                        .build());
-                }
+                String displayName = course.getName() + "-" + agg.knowledgePointName;
+                result.add(WeakKnowledgePointDTO.builder()
+                    .knowledgePointId(agg.knowledgePointId)
+                    .knowledgePointName(displayName)
+                    .courseId(courseId)
+                    .courseName(course.getName())
+                    .avgMastery(Math.round(avgMastery * 100) / 100.0)
+                    .studentCount(agg.scores.size())
+                    .build());
             }
         }
         
-         result.sort((a, b) -> Double.compare(a.getAvgMastery(), b.getAvgMastery()));
+        result.sort((a, b) -> Double.compare(a.getAvgMastery(), b.getAvgMastery()));
         return result.stream().limit(10).collect(Collectors.toList());
     }
 

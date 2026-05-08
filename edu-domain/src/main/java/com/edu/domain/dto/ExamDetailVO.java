@@ -51,9 +51,6 @@ public class ExamDetailVO {
     // 知识点薄弱分析（基于knowledge_points_distribution）
     private List<ExamKnowledgePointDTO> knowledgePointAnalysis;
     
-    // AI分析数据（从exam.ai_parsed_data获取）
-    private ExamAiAnalysisVO aiAnalysis;
-    
     // 知识点分值分布（从exam.knowledge_points_distribution获取）
     private Map<String, Object> knowledgePointsDistribution;
 }

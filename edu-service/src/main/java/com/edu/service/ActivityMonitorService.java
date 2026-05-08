@@ -114,8 +114,10 @@ public class ActivityMonitorService {
         // 5. 资源访问次数（从activity_record表统计）
         Integer resourceAccessCount = getStudentResourceAccessCount(studentId);
         
-        // 计算活跃度得分
-        BigDecimal activityScore = calculateActivityScore(loginCount, homeworkCount, examCount, studyDuration, resourceAccessCount);
+        // 活跃度得分统一使用 activity_record.activity_score 总和（与dashboard/学生管理一致）
+        Double rawScore = activityRecordRepository.getTotalActivityScore(studentId);
+        BigDecimal activityScore = rawScore != null ? BigDecimal.valueOf(rawScore) : BigDecimal.ZERO;
+        activityScore = activityScore.setScale(2, RoundingMode.HALF_UP);
         String activityLevel = getActivityLevel(activityScore);
         
         return StudentActivityVO.builder()
@@ -211,13 +213,13 @@ public class ActivityMonitorService {
         double totalScore = 0;
         
         for (Student student : students) {
-            StudentActivityVO vo = buildStudentActivityVO(student);
-            double score = vo.getActivityScore().doubleValue();
+            Double rawScore = activityRecordRepository.getTotalActivityScore(student.getId());
+            double score = rawScore != null ? rawScore : 0;
             totalScore += score;
             
             if (score >= 70) highCount++;
-            else if (score < 50) lowCount++;
-            if (score < 30) criticalCount++;
+            if (score < 20) lowCount++;
+            if (score < 10) criticalCount++;
         }
         
         double avgScore = totalStudents > 0 ? totalScore / totalStudents : 0;
@@ -299,7 +301,8 @@ public class ActivityMonitorService {
         Integer examCount = examGradeRepository.findByStudent(student).size();
         Integer studyDuration = getStudentStudyDuration(studentId);
         Integer resourceCount = getStudentResourceAccessCount(studentId);
-        BigDecimal activityScore = calculateActivityScore(loginCount, homeworkCount, examCount, studyDuration, resourceCount);
+        Double rawScore = activityRecordRepository.getTotalActivityScore(studentId);
+        BigDecimal activityScore = rawScore != null ? BigDecimal.valueOf(rawScore).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
         
         // 计算班级平均分
         ClassInfo classInfo = student.getClassInfo();
@@ -307,12 +310,15 @@ public class ActivityMonitorService {
         if (classInfo != null) {
             List<Student> classStudents = studentRepository.findByClassInfo(classInfo);
             double total = 0;
+            int count = 0;
             for (Student s : classStudents) {
-                StudentActivityVO vo = buildStudentActivityVO(s);
-                total += vo.getActivityScore().doubleValue();
+                Double sScore = activityRecordRepository.getTotalActivityScore(s.getId());
+                if (sScore != null) {
+                    total += sScore;
+                    count++;
+                }
             }
-            classAvg = classStudents.isEmpty() ? BigDecimal.ZERO : 
-                BigDecimal.valueOf(total / classStudents.size()).setScale(2, RoundingMode.HALF_UP);
+            classAvg = count > 0 ? BigDecimal.valueOf(total / count).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
         }
         
         String compareToClass = activityScore.compareTo(classAvg) >= 0 ?
@@ -334,41 +340,30 @@ public class ActivityMonitorService {
     private List<ActivityTrendVO> getActivityTrend(Student student) {
         List<ActivityTrendVO> trend = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
-        
+
+        List<ActivityRecord> allRecords = activityRecordRepository.findByStudent(student);
+        Map<LocalDate, List<ActivityRecord>> recordsByDate = allRecords.stream()
+            .collect(Collectors.groupingBy(r -> r.getActivityDate().toLocalDate()));
+
         for (int i = 29; i >= 0; i--) {
             LocalDate date = now.minusDays(i).toLocalDate();
-            LocalDateTime start = date.atStartOfDay();
-            LocalDateTime end = date.atTime(23, 59, 59);
-            
-            List<ActivityRecord> records = activityRecordRepository
-                .findByStudentAndActivityDateBetween(student, start, end);
-            
-            int loginCount = 0;
-            int homeworkCount = 0;
-            int studyDuration = 0;
-            int resourceCount = 0;
-            BigDecimal activityScore = BigDecimal.ZERO;
-            
-            for (ActivityRecord record : records) {
-                if ("LOGIN".equals(record.getType().toString())) loginCount++;
-                if ("HOMEWORK".equals(record.getType().toString())) homeworkCount++;
-                studyDuration += record.getStudyDuration() != null ? record.getStudyDuration() : 0;
-                resourceCount += record.getResourceAccessCount() != null ? record.getResourceAccessCount() : 0;
-            }
-            
-            // 计算当日活跃度
-            activityScore = calculateActivityScore(loginCount, homeworkCount, 0, studyDuration, resourceCount);
-            
+            List<ActivityRecord> dayRecords = recordsByDate.getOrDefault(date, new ArrayList<>());
+
+            double dayScore = dayRecords.stream()
+                .mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0)
+                .sum();
+            int studyDuration = dayRecords.stream().mapToInt(r -> r.getStudyDuration() != null ? r.getStudyDuration() : 0).sum();
+            int resourceCount = dayRecords.stream().mapToInt(r -> r.getResourceAccessCount() != null ? r.getResourceAccessCount() : 0).sum();
+
             trend.add(ActivityTrendVO.builder()
                 .date(date.toString())
-                .loginCount(loginCount)
-                .homeworkCount(homeworkCount)
+                .loginCount(0)
+                .homeworkCount(0)
                 .studyDuration(studyDuration)
                 .resourceCount(resourceCount)
-                .activityScore(activityScore)
+                .activityScore(BigDecimal.valueOf(dayScore).setScale(2, RoundingMode.HALF_UP))
                 .build());
         }
-        
         return trend;
     }
 

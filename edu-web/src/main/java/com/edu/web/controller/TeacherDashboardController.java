@@ -12,7 +12,10 @@ import com.edu.domain.dto.WeakKnowledgePointDTO;
 import com.edu.domain.dto.WrongQuestionDTO;
 import com.edu.repository.ClassRepository;
 import com.edu.repository.CourseRepository;
+import com.edu.repository.ExamRepository;
 import com.edu.repository.HomeworkRepository;
+import com.edu.repository.KnowledgePointRepository;
+import com.edu.repository.StudentKnowledgeMasteryRepository;
 import com.edu.repository.SubmissionRepository;
 import com.edu.service.ActivityRecordService;
 import com.edu.service.AuthService;
@@ -20,6 +23,7 @@ import com.edu.service.ClassService;
 import com.edu.service.ExamGradeService;
 import com.edu.service.ExamService;
 import com.edu.service.StudentKnowledgeMasteryService;
+import com.edu.service.StudentManageService;
 import com.edu.service.StudentService;
 import com.edu.service.SubmissionService;
 import com.edu.service.TeacherDashboardAiService;
@@ -56,34 +60,25 @@ public class TeacherDashboardController {
      private final ClassRepository classRepository;
      private final CourseRepository courseRepository;
      private final TeacherDashboardAiService teacherDashboardAiService;
-    
+     private final KnowledgePointRepository knowledgePointRepository;
+     private final StudentKnowledgeMasteryRepository masteryRepository;
+     private final ExamRepository examRepository;
+     private final StudentManageService studentManageService;
     
     /**
      * 班级教学看板
-     * GET /api/dashboard/teacher/class/{classId}
+     * GET /api/dashboard/teacher/class/{classId}?courseId=
      */
     @GetMapping("/class/{classId}")
     @PreAuthorize("isAuthenticated()")
-    public Result<Map<String, Object>> getClassDashboard(@PathVariable Long classId) {
+    public Result<Map<String, Object>> getClassDashboard(@PathVariable Long classId,
+            @RequestParam(required = false) Long courseId) {
          User currentUser = authService.getUser();
         Map<String, Object> dashboard = new HashMap<>();
-        
-        // 1. 班级基本信息
-        ClassInfo classInfo = classService.getClassById(classId);
-        if (classInfo == null) {
-            return Result.error("班级不存在");
-        }
 
-          // 权限校验
-        if (!"ADMIN".equals(currentUser.getRole().name())) {
-             Long teacherId = teacherService.findByUser(currentUser).orElseThrow(() -> new RuntimeException("Teacher not found"))
-            .getId();
-            List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(teacherId);
-            boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
-            if (!hasAccess) {
-                return Result.error("无权访问该班级数据");
-            }
-        }
+        // 权限校验
+        ClassInfo classInfo = checkClassAccess(currentUser, classId);
+        if (classInfo == null) return Result.error("班级不存在或无权访问");
 
         Map<String, Object> classInfoMap = new HashMap<>();
         classInfoMap.put("id", classInfo.getId());
@@ -95,165 +90,105 @@ public class TeacherDashboardController {
         // 2. 班级学生数量
         long studentCount = studentService.countByClassInfo(classInfo);
         dashboard.put("studentCount", studentCount);
-        
-        // 3. 最近一次考试成绩分布
-        List<Exam> exams = examService.findByClassInfo(classInfo);
-        if (!exams.isEmpty()) {
-            Exam latestExam = exams.get(0);
-            List<ExamGrade> grades = examGradeService.findByExam(latestExam);
-            
-            // 成绩分布统计
-            Map<String, Integer> scoreDistribution = new LinkedHashMap<>();
-            scoreDistribution.put("优秀(>=90)", 0);
-            scoreDistribution.put("良好(80-89)", 0);
-            scoreDistribution.put("中等(70-79)", 0);
-            scoreDistribution.put("及格(60-69)", 0);
-            scoreDistribution.put("不及格(<60)", 0);
-            
-            double totalScore = 0;
-            int scoreCount = 0;
-            List<Double> allScores = new ArrayList<>();
-            for (ExamGrade grade : grades) {
-                double score = grade.getScore().doubleValue();
-                allScores.add(score);
-                totalScore += score;
-                scoreCount++;
-                if (score >= 90) scoreDistribution.put("优秀(>=90)", scoreDistribution.get("优秀(>=90)") + 1);
-                else if (score >= 80) scoreDistribution.put("良好(80-89)", scoreDistribution.get("良好(80-89)") + 1);
-                else if (score >= 70) scoreDistribution.put("中等(70-79)", scoreDistribution.get("中等(70-79)") + 1);
-                else if (score >= 60) scoreDistribution.put("及格(60-69)", scoreDistribution.get("及格(60-69)") + 1);
-                else scoreDistribution.put("不及格(<60)", scoreDistribution.get("不及格(<60)") + 1);
-            }
-            
-            // 计算标准差（反映成绩离散程度）
-            double avg = totalScore /scoreCount;
-            double variance = allScores.stream()
-                .mapToDouble(s -> Math.pow(s - avg, 2))
-                .average()
-                .orElse(0);
-            double stdDev = Math.sqrt(variance);
-            
-            Map<String, Object> latestExamMap = new HashMap<>();
-            latestExamMap.put( "id", latestExam.getId());
-            latestExamMap.put(  "name", latestExam.getName());
-            latestExamMap.put("date", latestExam.getExamDate());
-            latestExamMap.put( "fullScore", latestExam.getFullScore());
-            dashboard.put("latestExam", latestExamMap);
 
-        
-            dashboard.put("scoreDistribution", scoreDistribution);
-            dashboard.put("classAverageScore", scoreCount==0 ? 0 :avg);
-            dashboard.put("highestScore", allScores.stream().max(Double::compare).orElse(0.0));
-            dashboard.put("lowestScore", allScores.stream().min(Double::compare).orElse(0.0));
-            dashboard.put("standardDeviation", Math.round(stdDev * 100) / 100.0);
-            dashboard.put("passRate", grades.isEmpty() ? 0 : 
-                (grades.stream().filter(g -> g.getScore().doubleValue() >= 60).count() * 100.0 / grades.size()));
+        // 3. 考试成绩相关（支持按课程过滤）
+        List<Exam> classExams;
+        if (courseId != null) {
+            Course course = courseRepository.findById(courseId).orElse(null);
+            classExams = course != null ? examRepository.findByClassInfoAndCourse(classInfo, course) : new ArrayList<>();
+        } else {
+            classExams = examService.findByClassInfo(classInfo);
         }
-        
-        // 4. 高频错题排行（前10）
-        List<WrongQuestionDTO> topWrongQuestions = calculateTopWrongQuestions(classId);
-        dashboard.put("topWrongQuestions", topWrongQuestions.stream().limit(10).map(wq -> {
-            Map<String, Object> map = new HashMap<>();
-            map.put("knowledgePointId", wq.getKnowledgePointId());
-            map.put("knowledgePointName", wq.getKnowledgePointName());
-            map.put("errorCount", wq.getErrorCount());
-            map.put("rank", 0);
-            return map;
-        }).collect(Collectors.toList()));
-        
-       // 5. 班级薄弱知识点（保持不变）
-        List<Map<String, Object>> weakKnowledgePoints = findClassWeakPointsWithDetails(classInfo);
+
+        if (!classExams.isEmpty()) {
+            List<ExamGrade> allGrades = new ArrayList<>();
+            for (Exam exam : classExams) {
+                allGrades.addAll(examGradeService.findByExam(exam));
+            }
+
+            if (!allGrades.isEmpty()) {
+                Map<String, Integer> scoreDistribution = new LinkedHashMap<>();
+                scoreDistribution.put("优秀(>=90)", 0);
+                scoreDistribution.put("良好(80-89)", 0);
+                scoreDistribution.put("中等(70-79)", 0);
+                scoreDistribution.put("及格(60-69)", 0);
+                scoreDistribution.put("不及格(<60)", 0);
+
+                double totalScore = 0;
+                int scoreCount = 0;
+                List<Double> allScores = new ArrayList<>();
+                for (ExamGrade grade : allGrades) {
+                    double score = grade.getScore().doubleValue();
+                    allScores.add(score);
+                    totalScore += score;
+                    scoreCount++;
+                    if (score >= 90) scoreDistribution.put("优秀(>=90)", scoreDistribution.get("优秀(>=90)") + 1);
+                    else if (score >= 80) scoreDistribution.put("良好(80-89)", scoreDistribution.get("良好(80-89)") + 1);
+                    else if (score >= 70) scoreDistribution.put("中等(70-79)", scoreDistribution.get("中等(70-79)") + 1);
+                    else if (score >= 60) scoreDistribution.put("及格(60-69)", scoreDistribution.get("及格(60-69)") + 1);
+                    else scoreDistribution.put("不及格(<60)", scoreDistribution.get("不及格(<60)") + 1);
+                }
+
+                double avg = totalScore / scoreCount;
+                dashboard.put("scoreDistribution", scoreDistribution);
+                dashboard.put("classAverageScore", Math.round(avg * 100) / 100.0);
+                dashboard.put("highestScore", allScores.stream().max(Double::compare).orElse(0.0));
+                dashboard.put("lowestScore", allScores.stream().min(Double::compare).orElse(0.0));
+                dashboard.put("passRate", Math.round((allGrades.stream().filter(g -> g.getScore().doubleValue() >= 60).count() * 100.0 / allGrades.size()) * 100) / 100.0);
+            }
+        }
+
+        // 4. 薄弱知识点（基于该班级在该课程下的所有知识点掌握度）
+        List<Map<String, Object>> weakKnowledgePoints = findClassWeakPointsWithDetails(classInfo, courseId);
         dashboard.put("weakKnowledgePoints", weakKnowledgePoints);
-        
-        // 6-8. 活跃度相关（从 activity_record 计算，移除 ActivityAlert）
+
+        // 5. 活跃度相关（班级维度，不依赖课程）
         LocalDate weekAgo = LocalDate.now().minusDays(7);
-        
-        // 低活跃度学生列表
+        List<Student> students = studentService.findByClassInfo(classInfo);
         List<Map<String, Object>> lowActivityStudents = new ArrayList<>();
         long lowActivityCount = 0;
+        double totalActivityScore = 0;
+        int studentWithActivity = 0;
 
-        List<Student> students = studentService.findByClassInfo(classInfo);
         for (Student student : students) {
             List<ActivityRecord> records = activityRecordService
                 .findByStudentAndDateRange(student, weekAgo, LocalDate.now());
-            double score = records.stream()
-                .mapToDouble(r -> r.getActivityScore() != null ? r.getActivityScore().doubleValue() : 0)
-                .sum();
-            if (score < 20) {
+            Double activityScore = studentManageService.getStudentActivityScore(student.getId());
+            if (activityScore != null) {
+                totalActivityScore += activityScore;
+            }
+            studentWithActivity++;
+            if (activityScore < 20) {
                 lowActivityCount++;
                 Map<String, Object> studentInfo = new HashMap<>();
                 studentInfo.put("studentId", student.getId());
                 studentInfo.put("studentName", student.getUser().getName());
                 studentInfo.put("studentNo", student.getStudentNo());
-                studentInfo.put("activityScore", score);
+                studentInfo.put("activityScore", activityScore);
                 lowActivityStudents.add(studentInfo);
             }
         }
         dashboard.put("lowActivityStudents", lowActivityStudents);
         dashboard.put("lowActivityCount", lowActivityCount);
-        
-       // 未解决预警数量（从 activity_record 计算严重低活跃度）
-        long unresolvedAlerts = lowActivityStudents.size();
-        dashboard.put("unresolvedAlerts", unresolvedAlerts);
-        
-        // 严重预警学生（活跃度低于10）
-        List<Map<String, Object>> criticalStudents = new ArrayList<>();
-        for (Map<String, Object> studentInfo : lowActivityStudents) {
-            double score = (double) studentInfo.get("activityScore");
-            if (score < 10) {
-                studentInfo.put("alertLevel", "CRITICAL");
-                studentInfo.put("alertType", "LOW_ACTIVITY");
-                studentInfo.put("threshold", 10);
-                criticalStudents.add(studentInfo);
-            }
-        }
-        dashboard.put("criticalAlerts", criticalStudents);
-        
-        // 9. 作业完成情况统计
-        long totalHomeworkCount = 0;
-        long totalSubmittedCount = 0;
-        double totalHomeworkAvgScore = 0;
-        
-        for (Student student : students) {
-            List<Submission> submissions = submissionService.findByStudent(student);
-            totalHomeworkCount += submissions.size();
-            totalSubmittedCount += submissions.stream()
-                .filter(s -> "GRADED".equals(s.getStatus()))
-                .count();
-            Double avgScore = submissionService.getStudentAverageScore(student.getId());
-            if (avgScore != null) {
-                totalHomeworkAvgScore += avgScore;
-            }
-        }
-        Map<String, Object> classHomeworkStatsMap = new HashMap<>();
-        classHomeworkStatsMap.put("totalHomework", totalHomeworkCount);
-        classHomeworkStatsMap.put("submittedCount", totalSubmittedCount);
-        classHomeworkStatsMap.put("submissionRate", totalHomeworkCount > 0 ? 
-            (totalSubmittedCount * 100.0 / totalHomeworkCount) : 0);
-        classHomeworkStatsMap.put("averageScore", students.isEmpty() ? 0 : totalHomeworkAvgScore / students.size());
-        dashboard.put("classHomeworkStats", classHomeworkStatsMap);
-        
-        // 10. AI 生成的班级学情总结报告
-       AiSuggestionDTO suggestion = null;
-        try {
-            suggestion = teacherDashboardAiService.getOrCreateReport(
-                "CLASS", 
-                classId, 
-                "COMPREHENSIVE"
-            );
-        } catch (Exception e) {
-        }
+        dashboard.put("classAvgActivityScore", studentWithActivity > 0 ? Math.round((totalActivityScore / students.size()) * 100) / 100.0 : 0);
 
-        if (suggestion != null) {
-            dashboard.put("aiSummary", suggestion.getSummary());
-            dashboard.put("aiSuggestions", String.join("\n", suggestion.getSuggestions()));
-            dashboard.put("aiReportDate", LocalDateTime.now());
-        } else {
-            dashboard.put("aiSummary", "暂无AI分析报告，请先上传足够的作业和考试数据");
-            dashboard.put("aiSuggestions", "建议上传历次考试成绩和作业数据，系统将自动生成学情分析");
-        }
-        
         return Result.success(dashboard);
+    }
+
+    /**
+     * 检查班级访问权限
+     */
+    private ClassInfo checkClassAccess(User currentUser, Long classId) {
+        ClassInfo classInfo = classService.getClassById(classId);
+        if (classInfo == null) return null;
+        if (!"ADMIN".equals(currentUser.getRole().name())) {
+            Long teacherId = teacherService.findByUser(currentUser)
+                .orElseThrow(() -> new RuntimeException("教师不存在")).getId();
+            List<ClassInfo> teacherClasses = dashboardService.getTeacherClasses(teacherId);
+            boolean hasAccess = teacherClasses.stream().anyMatch(c -> c.getId().equals(classId));
+            if (!hasAccess) return null;
+        }
+        return classInfo;
     }
 
     /**
@@ -317,7 +252,9 @@ public class TeacherDashboardController {
     }
     
     private String getKnowledgePointName(Long kpId) {
-        return "知识点" + kpId;
+        return knowledgePointRepository.findById(kpId)
+            .map(KnowledgePoint::getName)
+            .orElse("知识点" + kpId);
     }
 
      private static class WrongQuestionAggregate {
@@ -326,6 +263,47 @@ public class TeacherDashboardController {
         int totalStudents = 0;
     }
     
+    /**
+     * 获取班级作业成绩分布
+     * GET /api/dashboard/teacher/class/{classId}/homework-grade-distribution
+     */
+    @GetMapping("/class/{classId}/homework-grade-distribution")
+    @PreAuthorize("isAuthenticated()")
+    public Result<Map<String, Object>> getHomeworkGradeDistribution(@PathVariable Long classId) {
+        ClassInfo classInfo = classService.getClassById(classId);
+        if (classInfo == null) return Result.error("班级不存在");
+        
+        List<Student> students = studentService.findByClassInfo(classInfo);
+        List<Double> allScores = new ArrayList<>();
+        
+        for (Student student : students) {
+            List<Submission> submissions = submissionService.findByStudent(student);
+            for (Submission s : submissions) {
+                if (s.getScore() != null && "GRADED".equals(s.getStatus())) {
+                    allScores.add(s.getScore());
+                }
+            }
+        }
+        
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("className", classInfo.getName());
+        result.put("studentCount", students.size());
+        
+        Map<String, Integer> distribution = new LinkedHashMap<>();
+        distribution.put("A", 0); distribution.put("B", 0); distribution.put("C", 0);
+        distribution.put("D", 0); distribution.put("F", 0);
+        
+        for (Double score : allScores) {
+            if (score >= 90) distribution.put("A", distribution.get("A") + 1);
+            else if (score >= 80) distribution.put("B", distribution.get("B") + 1);
+            else if (score >= 70) distribution.put("C", distribution.get("C") + 1);
+            else if (score >= 60) distribution.put("D", distribution.get("D") + 1);
+            else distribution.put("F", distribution.get("F") + 1);
+        }
+        result.put("gradeDistribution", distribution);
+        return Result.success(result);
+    }
+
     /**
      * 获取班级成绩趋势
      * GET /api/dashboard/teacher/class/{classId}/trend
@@ -626,54 +604,56 @@ public class TeacherDashboardController {
     }
     
     /**
-     * 获取班级薄弱知识点详情（带学生列表）
+     * 获取班级薄弱知识点详情（带学生列表，支持按课程过滤）
      */
-    private List<Map<String, Object>> findClassWeakPointsWithDetails(ClassInfo classInfo) {
+    private List<Map<String, Object>> findClassWeakPointsWithDetails(ClassInfo classInfo, Long courseId) {
         List<Student> students = studentService.findByClassInfo(classInfo);
-        
-        // 统计各知识点平均掌握度
+        Set<Long> studentIds = students.stream().map(Student::getId).collect(Collectors.toSet());
+
         Map<Long, Map<String, Object>> kpStats = new HashMap<>();
-        
+
         for (Student student : students) {
-            List<StudentKnowledgeMastery> masteries = masteryService.findByStudent(student);
+            List<StudentKnowledgeMastery> masteries;
+            if (courseId != null) {
+                masteries = masteryRepository.findByStudentIdAndCourseId(student.getId(), courseId);
+            } else {
+                masteries = masteryService.findByStudent(student);
+            }
             for (StudentKnowledgeMastery mastery : masteries) {
+                if (mastery.getKnowledgePoint() == null) continue;
                 Long kpId = mastery.getKnowledgePoint().getId();
                 kpStats.putIfAbsent(kpId, new HashMap<>());
                 Map<String, Object> stat = kpStats.get(kpId);
                 stat.put("name", mastery.getKnowledgePoint().getName());
                 stat.put("id", kpId);
-                
+                if (mastery.getKnowledgePoint().getCourse() != null) {
+                    stat.put("courseName", mastery.getKnowledgePoint().getCourse().getName());
+                }
+
                 List<Double> scores = (List<Double>) stat.getOrDefault("scores", new ArrayList<Double>());
                 scores.add(mastery.getMasteryLevel().doubleValue());
                 stat.put("scores", scores);
             }
         }
-        
-        // 计算平均并筛选低于60%的知识点
+
         List<Map<String, Object>> weakPoints = new ArrayList<>();
         for (Map.Entry<Long, Map<String, Object>> entry : kpStats.entrySet()) {
             Map<String, Object> stat = entry.getValue();
             List<Double> scores = (List<Double>) stat.get("scores");
             double avg = scores.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-            
-            if (avg < 60) {
-                Map<String, Object> weak = new HashMap<>();
-                weak.put("knowledgePointId", entry.getKey());
-                weak.put("knowledgePointName", stat.get("name"));
-                weak.put("avgMastery", Math.round(avg * 100) / 100.0);
-                weak.put("studentCount", scores.size());
-                weak.put("affectedRate", Math.round((scores.size() * 100.0 / students.size()) * 100) / 100.0);
-                weakPoints.add(weak);
-            }
+
+            Map<String, Object> weak = new HashMap<>();
+            weak.put("knowledgePointId", entry.getKey());
+            String courseName = (String) stat.getOrDefault("courseName", "");
+            String kpName = (String) stat.get("name");
+            weak.put("knowledgePointName", courseName.isEmpty() ? kpName : courseName + "-" + kpName);
+            weak.put("avgMastery", Math.round(avg * 100) / 100.0);
+            weak.put("studentCount", scores.size());
+            weakPoints.add(weak);
         }
-        
-        // 按掌握度排序（最弱的排最前）
-        weakPoints.sort((a, b) -> Double.compare(
-            (double) a.get("avgMastery"),
-            (double) b.get("avgMastery")
-        ));
-        
-        return weakPoints;
+
+        weakPoints.sort((a, b) -> Double.compare((double) a.get("avgMastery"), (double) b.get("avgMastery")));
+        return weakPoints.stream().limit(10).collect(Collectors.toList());
     }
     
     private String generateTextSummary(String className, int studentCount, 
@@ -777,6 +757,38 @@ public class TeacherDashboardController {
             })
             .collect(java.util.stream.Collectors.toList());
         
+        return Result.success(result);
+    }
+
+    /**
+     * 获取某班级关联的课程（用于前端课程下拉框）
+     * GET /api/dashboard/teacher/class/{classId}/courses
+     */
+    @GetMapping("/class/{classId}/courses")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<Map<String, Object>>> getClassCourses(@PathVariable Long classId) {
+        User currentUser = authService.getUser();
+        ClassInfo classInfo = checkClassAccess(currentUser, classId);
+        if (classInfo == null) return Result.error("班级不存在或无权访问");
+
+        // 通过该班级学生选修的课程确定
+        List<Student> students = studentService.findByClassInfo(classInfo);
+        Set<Long> courseIds = new HashSet<>();
+        for (Student student : students) {
+            List<Course> studentCourses = courseRepository.findByStudentId(student.getId());
+            studentCourses.forEach(c -> courseIds.add(c.getId()));
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Long cid : courseIds) {
+            Course course = courseRepository.findById(cid).orElse(null);
+            if (course != null) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("id", course.getId());
+                map.put("name", course.getName());
+                result.add(map);
+            }
+        }
         return Result.success(result);
     }
 

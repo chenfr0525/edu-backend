@@ -170,22 +170,6 @@ public class ExamManageService {
         int studentCount = grades.size();
         double avg = grades.stream().mapToDouble(g -> g.getScore().doubleValue()).average().orElse(0);
         long passCount = grades.stream().filter(g -> g.getScore().doubleValue() >= exam.getPassScore()).count();
-        
-         boolean hasAiAnalysis = false;
-        try {
-            // 使用统一AI服务生成考试分析报告
-            unifiedAiAnalysisService.getOrCreateAnalysis(
-                "EXAM",
-                exam.getId(),
-                "EXAM_ANALYSIS",
-                false
-                );
-                hasAiAnalysis = true;
-                log.info("考试AI分析完成，考试ID: {}", exam.getId());
-            } catch (Exception e) {
-                log.error("考试AI分析失败", e);
-                hasAiAnalysis = false;
-            }
 
         return ExamInfoVO.builder()
             .id(exam.getId())
@@ -205,7 +189,6 @@ public class ExamManageService {
                 BigDecimal.valueOf(passCount * 100.0 / studentCount).setScale(2, RoundingMode.HALF_UP))
             .highestScore(exam.getHighestScore())
             .createdAt(exam.getCreatedAt())
-            .hasAiAnalysis(hasAiAnalysis)
             .courseId(exam.getClassInfo().getId())
             .classId(exam.getClassInfo().getId())
             .description(exam.getDescription())
@@ -242,7 +225,22 @@ public class ExamManageService {
         exam.setCourse(course);
     }
 
-     if (request.getKnowledgePointIds() != null) {
+     if (request.getKnowledgePointIds() != null
+            && !request.getKnowledgePointIds().equals(exam.getKnowledgePointIds())) {
+        exam.setKnowledgePointIds(request.getKnowledgePointIds());
+        log.info("更新考试知识点ID列表并同步知识点得分: {}", request.getKnowledgePointIds());
+        List<KnowledgePoint> kps = knowledgePointRepository.findAllById(request.getKnowledgePointIds());
+        List<ExamGrade> grades = examGradeRepository.findByExam(exam);
+        for (ExamGrade grade : grades) {
+            double scoreRate = (grade.getScore() != null && exam.getFullScore() != null && exam.getFullScore() > 0)
+                ? grade.getScore().doubleValue() / exam.getFullScore() * 100
+                : (grade.getScore() != null ? grade.getScore().doubleValue() : 0);
+            for (KnowledgePoint kp : kps) {
+                saveKnowledgePointScoreDetail(grade.getStudent(), kp, "EXAM", exam.getId(), scoreRate);
+                updateStudentMastery(grade.getStudent(), kp, scoreRate);
+            }
+        }
+    } else if (request.getKnowledgePointIds() != null) {
         exam.setKnowledgePointIds(request.getKnowledgePointIds());
         log.info("更新考试知识点ID列表: {}", request.getKnowledgePointIds());
     }
@@ -379,9 +377,6 @@ public ExamDetailVO getExamDetail(Long examId) {
     List<ExamStudentGradeVO> studentGrades = buildStudentGrades(grades);
     List<ExamKnowledgePointDTO> knowledgePointAnalysis = buildKnowledgePointAnalysis(exam);
     
-    // 修改：从 ai_analysis_report 表获取 AI 分析
-    ExamAiAnalysisVO aiAnalysis = parseAiAnalysis(exam);
-    
     // 知识点分布已废弃，返回空Map
     Map<String, Object> kpDistribution = new HashMap<>();
     kpDistribution.put("knowledgePoints", new ArrayList<>());
@@ -399,7 +394,7 @@ public ExamDetailVO getExamDetail(Long examId) {
         .classAvgScore(exam.getClassAvgScore()).highestScore(exam.getHighestScore()).lowestScore(exam.getLowestScore())
         .stats(stats).scoreDistribution(distribution)
         .studentGrades(studentGrades).knowledgePointAnalysis(knowledgePointAnalysis)
-        .aiAnalysis(aiAnalysis).knowledgePointsDistribution(kpDistribution)
+        .knowledgePointsDistribution(kpDistribution)
         .build();
 }
 

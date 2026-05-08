@@ -106,4 +106,15 @@ public interface KnowledgePointScoreDetailRepository extends JpaRepository<Knowl
     BigDecimal getStudentAvgScoreRate(@Param("studentId") Long studentId, 
                                        @Param("kpId") Long kpId);
 
+    /**
+     * 查询某知识点在某课程选修学生中的平均得分率（跨班级）
+     */
+    @Query("SELECT AVG(k.scoreRate) FROM KnowledgePointScoreDetail k " +
+           "WHERE k.knowledgePoint.id = :kpId " +
+           "AND k.student.id IN (" +
+           "  SELECT e.student.id FROM Enrollment e WHERE e.course.id = :courseId" +
+           ")")
+    BigDecimal getCourseEnrollmentAvgScoreRate(@Param("kpId") Long kpId,
+                                                @Param("courseId") Long courseId);
+
 }

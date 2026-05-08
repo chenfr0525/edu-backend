@@ -9,6 +9,7 @@ com\edu\web\controller\KnowledgePointScoreDetailController.class
 com\edu\web\controller\StudentHomeworkAnalysisController.class
 com\edu\web\controller\StudentDashboardController.class
 com\edu\web\controller\StudentKnowledgeAnalysisController.class
+com\edu\web\controller\TeacherDashboardController$1.class
 com\edu\web\security\JwtAuthenticationFilter.class
 com\edu\web\controller\AiAnalysisReportController.class
 com\edu\web\controller\ScorePredictionController.class

@@ -291,7 +291,7 @@ public class StudentManageService {
     /**
      * 获取学生活跃度得分
      */
-    private Double getStudentActivityScore(Long studentId) {
+    public Double getStudentActivityScore(Long studentId) {
         return activityRecordRepository.getTotalActivityScore(studentId);
     }  
  
